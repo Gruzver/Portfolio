@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Gruzver Phocco — Robotics Engineer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+/* ─── RESET & BASE ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:           #ffffff;
+  --surface:      #f6f8fb;
+  --surface-low:  #eef2f7;
+  --surface-mid:  #e5ebf1;
+  --surface-high: #dbe2ea;
+  --border:       #dde3ea;
+  --border-dim:   #b6c0cb;
+  --text:         #161a1e;
+  --text-dim:     #4a535c;
+  --text-mute:    #6b757f;
+  --accent:       #ba1a1a;   /* target / error red */
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Inter', sans-serif;
+}
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── LAYOUT ────────────────────────────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* top nav */
+#nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px;
+  height: 48px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  z-index: 10;
+}
+#nav .brand {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+#nav .nav-links {
+  display: flex;
+  gap: 32px;
+  list-style: none;
+}
+#nav .nav-links a {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+#nav .nav-links a:hover { color: var(--text); }
+
+/* two-column */
+#columns {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ─── LEFT PANEL ────────────────────────────────────────────────────────────── */
+#left {
+  width: 40%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* left panel top bar */
+#left-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--surface-low);
+}
+.lbl { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-dim); }
+.lbl.primary { color: var(--text); }
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  background: var(--bg);
+}
+.dot-live { width: 6px; height: 6px; background: var(--text); border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* arm canvas */
+#canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+#canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+#canvas-label {
+  position: absolute;
+  bottom: 6px;
+  left: 8px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-mute);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+#shutdown-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.6);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+/* checkpoint badge — top-left of canvas */
+#demo-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+#demo-badge .bp-ep { color: var(--text); font-weight: 500; font-size: 11px; }
+#demo-badge .bp-hit { color: #2e7d32; }
+#demo-badge .bp-miss { color: var(--accent); }
+
+/* live metrics row */
+#metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.metric-cell {
+  padding: 6px 10px;
+  border-right: 1px solid var(--border);
+}
+.metric-cell:last-child { border-right: none; }
+.metric-key  { font-family: var(--mono); font-size: 9px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+.metric-val  { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--text); }
+
+/* mini charts 2×2 */
+#charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.chart-cell {
+  padding: 6px 8px 4px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.chart-cell:nth-child(2n) { border-right: none; }
+.chart-cell:nth-child(3),
+.chart-cell:nth-child(4)  { border-bottom: none; }
+.chart-title { font-family: var(--mono); font-size: 8.5px; color: var(--text-mute); letter-spacing: 0.04em; margin-bottom: 3px; }
+.chart-canvas { display: block; width: 100%; height: 64px; }
+
+/* hyperparameter sliders */
+#sliders {
+  padding: 8px 12px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slider-label { font-family: var(--mono); font-size: 9.5px; color: var(--text-dim); width: 22px; text-align: right; }
+.slider-row input[type=range] {
+  flex: 1;
+  height: 2px;
+  -webkit-appearance: none;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+}
+.slider-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px; height: 10px;
+  background: var(--text);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.slider-val { font-family: var(--mono); font-size: 9px; color: var(--text); width: 52px; }
+.reward-toggle { display: flex; gap: 0; }
+.rtbtn {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.rtbtn.active { background: var(--text); color: #fff; border-color: var(--text); }
+.rtbtn:first-child { border-right: none; }
+#sliders-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-mute);
+  margin-bottom: 2px;
+}
+
+/* ─── RIGHT PANEL ───────────────────────────────────────────────────────────── */
+#right {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg);
+}
+#right::-webkit-scrollbar { width: 4px; }
+#right::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* right content — kept narrow and centered so the wider 60% panel gives the
+   page breathing room on both sides */
+.right-inner { max-width: 620px; margin: 0 auto; padding: 56px 48px 96px; }
+
+/* hero */
+.hero { display: flex; gap: 28px; align-items: flex-start; margin-bottom: 56px; }
+.hero-avatar {
+  width: 88px; height: 88px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  filter: grayscale(1);
+  flex-shrink: 0;
+}
+.hero-avatar-placeholder {
+  width: 88px; height: 88px;
+  border: 1px solid var(--border);
+  background: var(--surface-mid);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-mute);
+  text-align: center;
+  line-height: 1.4;
+}
+.hero-text .eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  margin-bottom: 8px;
+}
+.hero-text h1 {
+  font-family: var(--sans);
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.hero-text p {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-dim);
+  margin-bottom: 20px;
+  max-width: 420px;
+}
+.degrees { display: flex; flex-direction: column; gap: 2px; margin-bottom: 16px; }
+.degree { font-family: var(--mono); font-size: 11px; color: var(--text-dim); letter-spacing: 0.02em; }
+.degree-school { font-family: var(--mono); font-size: 11px; color: var(--text-mute); letter-spacing: 0.02em; margin-top: 3px; }
+.hero-btns { display: flex; gap: 10px; }
+.btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s;
+}
+.btn:hover { background: var(--surface-high); }
+
+/* section headers */
+.section { margin-bottom: 56px; }
+.section-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+/* project cards */
+.project-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  margin-bottom: 16px;
+  background: var(--surface);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.project-card:hover { box-shadow: 0 6px 24px rgba(20,30,45,0.07); border-color: var(--border-dim); }
+
+/* media slot — photo or video */
+.project-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: repeating-linear-gradient(45deg, var(--surface-mid) 0 9px, var(--surface-low) 9px 18px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.project-media img, .project-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.project-media .media-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 4px 11px;
+}
+.project-body { padding: 18px 18px 16px; }
+.project-id   { font-family: var(--mono); font-size: 9px; color: var(--text-mute); margin-bottom: 5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.project-name { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 3px; letter-spacing: -0.01em; }
+.project-role { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-bottom: 13px; letter-spacing: 0.02em; }
+.project-points { list-style: none; margin: 0 0 14px; display: flex; flex-direction: column; gap: 7px; }
+.project-points li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+.project-points li::before {
+  content: '';
+  position: absolute;
+  left: 2px; top: 7px;
+  width: 5px; height: 5px;
+  background: var(--border-dim);
+}
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--bg);
+  letter-spacing: 0.03em;
+}
+
+/* research */
+.pub-item {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pub-venue { font-family: var(--mono); font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.pub-title  { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 4px; line-height: 1.4; }
+.pub-authors { font-size: 12px; color: var(--text-dim); }
+
+/* contact */
+.contact-links { display: flex; flex-direction: column; gap: 10px; }
+.contact-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  transition: color 0.15s;
+}
+.contact-link:hover { color: var(--text); }
+.contact-link .ck { color: var(--text-mute); width: 60px; }
+
+/* footer */
+#footer {
+  position: relative;
+  height: 40px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-low);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  flex-shrink: 0;
+}
+#footer .lbl { font-size: 9px; }
+#footer-status { display: flex; gap: 16px; }
+
+/* ─── RESPONSIVE — mobile: hide left panel ──────────────────────────────────── */
+@media (max-width: 767px) {
+  html, body { overflow: auto; }
+  #app { height: auto; overflow: visible; }
+  #columns { flex-direction: column; overflow: visible; }
+  #left  { display: none; }   /* arm hidden on mobile */
+  #right { overflow: visible; }
+  .right-inner { padding: 24px 20px 60px; }
+  #nav .nav-links { display: none; }
+  #footer-status { display: none; }
+  .hero { flex-direction: column; }
+  .hero-text h1 { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TOP NAV -->
+  <nav id="nav">
+    <span class="brand">Gruzver Phocco · Portfolio</span>
+    <ul class="nav-links">
+      <li><a href="#research">Research</a></li>
+      <li><a href="#projects">Projects</a></li>
+      <li><a href="#achievements">Achievements</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+  </nav>
+
+  <div id="columns">
+
+    <!-- ═══ LEFT PANEL ══════════════════════════════════════════════════════════ -->
+    <div id="left">
+
+      <!-- header -->
+      <div id="left-header">
+        <span class="lbl primary">RL Agent · 2-DOF Arm</span>
+        <div class="status-pill">
+          <div class="dot-live"></div>
+          <span class="lbl" id="ep-counter">training · ep 0</span>
+        </div>
+      </div>
+
+      <!-- arm canvas -->
+      <div id="canvas-wrap">
+        <canvas id="arm-canvas"></canvas>
+        <div id="demo-badge"></div>
+        <div id="canvas-label">DEMO // GREEDY POLICY ROLLOUT</div>
+        <div id="shutdown-overlay">loading policy…</div>
+      </div>
+
+      <!-- live metrics row -->
+      <div id="metrics">
+        <div class="metric-cell">
+          <div class="metric-key">Episode</div>
+          <div class="metric-val" id="m-ep">0</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-key">Reward</div>
+          <div class="metric-val" id="m-rw">—</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-key">Distance</div>
+          <div class="metric-val" id="m-dist">—</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-key">Success</div>
+          <div class="metric-val" id="m-suc">0%</div>
+        </div>
+      </div>
+
+      <!-- mini charts -->
+      <div id="charts">
+        <div class="chart-cell">
+          <div class="chart-title">Σ Reward / episode</div>
+          <canvas class="chart-canvas" id="chart-reward"></canvas>
+        </div>
+        <div class="chart-cell">
+          <div class="chart-title">Entropy H(π)</div>
+          <canvas class="chart-canvas" id="chart-entropy"></canvas>
+        </div>
+        <div class="chart-cell">
+          <div class="chart-title">Grad norm ‖∇J‖</div>
+          <canvas class="chart-canvas" id="chart-grad"></canvas>
+        </div>
+        <div class="chart-cell">
+          <div class="chart-title">Policy π(Δθ₁)</div>
+          <canvas class="chart-canvas" id="chart-policy"></canvas>
+        </div>
+      </div>
+
+      <!-- sliders -->
+      <div id="sliders">
+        <div id="sliders-label">Hyperparameters</div>
+
+        <div class="slider-row">
+          <span class="slider-label">α</span>
+          <input type="range" id="sl-alpha" min="0" max="1" step="0.001" value="0.9"/>
+          <span class="slider-val" id="sv-alpha">5.0e-3</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-label">γ</span>
+          <input type="range" id="sl-gamma" min="0" max="1" step="0.001" value="0.9"/>
+          <span class="slider-val" id="sv-gamma">0.990</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-label">β</span>
+          <input type="range" id="sl-beta" min="0" max="1" step="0.001" value="0.1"/>
+          <span class="slider-val" id="sv-beta">0.010</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-label lbl">R</span>
+          <div class="reward-toggle">
+            <button class="rtbtn active" id="btn-dense">Dense</button>
+            <button class="rtbtn"        id="btn-sparse">Sparse</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- ═══ RIGHT PANEL ═════════════════════════════════════════════════════════ -->
+    <div id="right">
+      <div class="right-inner">
+
+        <!-- HERO -->
+        <div class="hero" id="top">
+          <img class="hero-avatar" src="assets/gruzver_phocco.png" alt="Gruzver Phocco"/>
+          <div class="hero-text">
+            <div class="eyebrow">Robotics Engineer · ROS 2 · RL</div>
+            <h1>Gruzver Phocco</h1>
+            <div class="degrees">
+              <span class="degree">MSc Computer Science — Robotics &amp; Reinforcement Learning</span>
+              <span class="degree">B.Eng Mechatronics Engineering</span>
+              <span class="degree-school">Pontifical Catholic University of Peru (PUCP)</span>
+            </div>
+            <p>
+              Robotics engineer and MSc candidate in Computer Science at PUCP, focused on
+              autonomous navigation, robot perception, and multi-robot systems built for
+              real-world deployment. I&rsquo;m currently developing a heterogeneous
+              search-and-rescue robot team — quadruped, rover, and thermal UAV — for
+              post-disaster victim detection under a PROCIENCIA national research grant. My
+              core work spans ROS 2 navigation stacks, thermal person detection, sim-to-real
+              transfer, and reinforcement learning for autonomous systems.
+            </p>
+            <div class="hero-btns">
+              <a class="btn" href="https://github.com/Gruzver" target="_blank">↗ GitHub</a>
+              <a class="btn" href="CV_Gruzver_Phocco___Robotics-3.pdf" target="_blank">↓ Résumé</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- RESEARCH EXPERIENCE -->
+        <section class="section" id="research">
+          <div class="section-label">Research Experience</div>
+
+          <div class="project-card">
+            <div class="project-media"><img src="assets/sar_sim.gif" alt="Thermal person detection from drone video" loading="lazy"/></div>
+            <div class="project-body">
+              <div class="project-id">PUCP · Interdisciplinary Research Lab · Jan 2026 — Present</div>
+              <div class="project-name">Search &amp; Rescue Robotics</div>
+              <div class="project-role">Research Assistant</div>
+              <ul class="project-points">
+                <li>Built an end-to-end ROS 2 pipeline for real-time person detection from thermal drone video — YOLOv8x fine-tuned on ~5,000 custom thermal frames, multi-object tracking with persistent IDs, and Kalman-filter GPS smoothing.</li>
+                <li>Developed pixel-to-GPS geolocation from full drone telemetry (altitude, yaw/pitch/roll, FOV), feeding a live Leaflet.js operator dashboard for SAR teams.</li>
+                <li>Planned and executed aerial data-collection campaigns with a DJI thermal drone; currently training a multispectral detection model for post-disaster scenarios.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">ROS 2</span>
+                <span class="tag">YOLOv8x</span>
+                <span class="tag">Thermal Imaging</span>
+                <span class="tag">Kalman Filter</span>
+                <span class="tag">Leaflet.js</span>
+                <span class="tag">DJI</span>
+                <span class="tag">SAR</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-media"><img src="assets/amii.gif" alt="AMII social robot navigating" loading="lazy"/></div>
+            <div class="project-body">
+              <div class="project-id">PUCP · Interdisciplinary Research Lab · Sep 2024 — Mar 2026</div>
+              <div class="project-name">Social Robotics — AMII</div>
+              <div class="project-role">Research Assistant</div>
+              <ul class="project-points">
+                <li>Designed and deployed the full locomotion system for AMII, a differential-drive social robot: mechanical design, electrical integration, and a ROS 2 Nav2 stack (AMCL, SLAM Toolbox, EKF, RealSense D435 obstacle avoidance).</li>
+                <li>Built an agentic NLP interaction stack for autonomous, LLM-based dialogue with people in real public environments.</li>
+                <li>Integrated navigation, hardware drivers, and natural-language control into a unified deployable system; coordinated live demos at public events.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">ROS 2</span>
+                <span class="tag">Nav2</span>
+                <span class="tag">SLAM Toolbox</span>
+                <span class="tag">AMCL</span>
+                <span class="tag">EKF</span>
+                <span class="tag">RealSense D435</span>
+                <span class="tag">LLM</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- KEY PROJECTS -->
+        <section class="section" id="projects">
+          <div class="section-label">Key Projects</div>
+
+          <div class="project-card">
+            <div class="project-media"><img src="assets/chaska.gif" alt="Chaska rover arm and locomotion" loading="lazy"/></div>
+            <div class="project-body">
+              <div class="project-id">URC / ERC Competitions · Oct 2025 — Present</div>
+              <div class="project-name">Chaska Rover</div>
+              <div class="project-role">Manipulation &amp; Locomotion Lead</div>
+              <ul class="project-points">
+                <li>Led design and deployment of a 6-DOF robotic arm: mechanical design, Gazebo simulation, MoveIt 2 motion planning, and on-hardware AI object detection.</li>
+                <li>Developed multi-mode locomotion (swerve, differential, Ackermann) with velocity-based inverse kinematics and real-time ROS 2 control.</li>
+                <li>Implemented PS5 DualSense teleoperation for responsive field operation.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">ROS 2 Humble</span>
+                <span class="tag">Gazebo Ignition Fortress</span>
+                <span class="tag">MoveIt 2</span>
+                <span class="tag">Pinocchio</span>
+                <span class="tag">3D LiDAR</span>
+                <span class="tag">Python</span>
+                <span class="tag">URC</span>
+                <span class="tag">ERC</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-media"><span class="media-tag">DROP PHOTO / VIDEO</span></div>
+            <div class="project-body">
+              <div class="project-id">Robotic Manipulation · 2024</div>
+              <div class="project-name">Kit Manipulador</div>
+              <div class="project-role">4-DOF Arm — Sim &amp; Hardware</div>
+              <ul class="project-points">
+                <li>Built a 4-DOF robotic arm with a full ROS 2 + MoveIt 2 motion-planning pipeline.</li>
+                <li>Simulated in Gazebo and integrated on real hardware via micro-ROS on a Raspberry Pi Pico W.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">ROS 2</span>
+                <span class="tag">MoveIt 2</span>
+                <span class="tag">micro-ROS</span>
+                <span class="tag">Gazebo</span>
+                <span class="tag">Raspberry Pi Pico W</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-media"><span class="media-tag">DROP PHOTO / VIDEO</span></div>
+            <div class="project-body">
+              <div class="project-id">PUCP Intelligent Robotics Group · Mar 2024 — Present</div>
+              <div class="project-name">RL Navigation &amp; Autonomous Chess</div>
+              <div class="project-role">Reinforcement Learning &amp; Vision</div>
+              <ul class="project-points">
+                <li>Trained autonomous navigation policies with reinforcement learning on AWS DeepRacer.</li>
+                <li>Developed a ROS 2-controlled arm for autonomous chess playing with computer-vision-based piece detection.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">Reinforcement Learning</span>
+                <span class="tag">AWS DeepRacer</span>
+                <span class="tag">ROS 2</span>
+                <span class="tag">Computer Vision</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ACHIEVEMENTS -->
+        <section class="section" id="achievements">
+          <div class="section-label">Achievements</div>
+
+          <div class="project-card">
+            <div class="project-media"><img src="assets/robocup.gif" alt="RoboCup autonomous arm manipulation" loading="lazy"/></div>
+            <div class="project-body">
+              <div class="project-id">Finalist · RoboCup 2026 World Championship · Incheon, South Korea</div>
+              <div class="project-name">RoboCup ARM Challenge</div>
+              <div class="project-role">Autonomous Manipulation</div>
+              <ul class="project-points">
+                <li>Selected as a finalist to compete in the RoboCup 2026 World Championship.</li>
+                <li>Developing an autonomous robot-arm pipeline with RGB-D point-cloud perception, object classification, and pick-and-place manipulation.</li>
+                <li>Built on a UR5e manipulator using MATLAB / Simulink.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">RoboCup</span>
+                <span class="tag">UR5e</span>
+                <span class="tag">RGB-D</span>
+                <span class="tag">Point Cloud</span>
+                <span class="tag">MATLAB / Simulink</span>
+                <span class="tag">Pick-and-Place</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-media"><img src="assets/intrinsic.gif" alt="Vision-based connector insertion policy" loading="lazy"/></div>
+            <div class="project-body">
+              <div class="project-id">Top Qualifier · ~224/300 qualification score · 2026</div>
+              <div class="project-name">AI for Industry Challenge — Intrinsic</div>
+              <div class="project-role">Vision-Based Insertion Policy</div>
+              <ul class="project-points">
+                <li>Developed a vision-based fiber-optic connector insertion policy for a UR5e robot, scoring ~224/300 in the qualification phase.</li>
+                <li>Built a YOLOv8-Pose keypoint detection and solvePnP 6-DOF pose-estimation pipeline with multi-camera fusion.</li>
+                <li>Executed impedance-controlled spiral insertion with force/torque snap detection.</li>
+              </ul>
+              <div class="tags">
+                <span class="tag">Intrinsic</span>
+                <span class="tag">UR5e</span>
+                <span class="tag">YOLOv8-Pose</span>
+                <span class="tag">solvePnP</span>
+                <span class="tag">Force/Torque</span>
+                <span class="tag">Impedance Control</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CONTACT -->
+        <section class="section" id="contact">
+          <div class="section-label">Contact</div>
+          <div class="contact-links">
+            <a class="contact-link" href="mailto:gruzver.phocco@pucp.edu.pe">
+              <span class="ck">Email</span>gruzver.phocco@pucp.edu.pe
+            </a>
+            <a class="contact-link" href="https://linkedin.com/in/gruzverphocco" target="_blank">
+              <span class="ck">LinkedIn</span>linkedin.com/in/gruzverphocco
+            </a>
+            <a class="contact-link" href="https://github.com/Gruzver" target="_blank">
+              <span class="ck">GitHub</span>github.com/Gruzver
+            </a>
+          </div>
+        </section>
+
+      </div>
+    </div><!-- /right -->
+
+  </div><!-- /columns -->
+
+  <!-- FOOTER -->
+  <footer id="footer">
+    <span class="lbl">SYSTEM_STATUS: NOMINAL // 2026</span>
+    <div id="footer-status">
+      <span class="lbl" id="f-ep">EP 0</span>
+      <span class="lbl" id="f-sigma">σ 1.000</span>
+      <span class="lbl" id="f-baseline">baseline 0.000</span>
+    </div>
+  </footer>
+
+</div><!-- /app -->
+
+<script>
+// ─── MOBILE GUARD — don't spawn the worker if the arm panel is hidden ────────
+const IS_DESKTOP = window.matchMedia('(min-width: 768px)').matches;
+
+// ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
+const armCanvas = document.getElementById('arm-canvas');
+const armCtx    = armCanvas.getContext('2d');
+const overlay   = document.getElementById('shutdown-overlay');
+const badge     = document.getElementById('demo-badge');
+
+// Resize canvas to fill its container (device pixel ratio aware)
+function resizeArmCanvas() {
+  const wrap = document.getElementById('canvas-wrap');
+  const dpr  = window.devicePixelRatio || 1;
+  armCanvas.width  = wrap.clientWidth  * dpr;
+  armCanvas.height = wrap.clientHeight * dpr;
+  armCtx.setTransform(1, 0, 0, 1, 0, 0);
+  armCtx.scale(dpr, dpr);
+}
+resizeArmCanvas();
+window.addEventListener('resize', resizeArmCanvas);
+
+// ─── COORDINATE MAPPING ───────────────────────────────────────────────────────
+// Physics: shoulder at origin, y-up, L1+L2 ≈ 1.0
+// Canvas:  shoulder at bottom-center, y-down
+function physToCanvas(px, py) {
+  const wrap = document.getElementById('canvas-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const sx = W * 0.5;            // shoulder x
+  const sy = H * 0.80;           // shoulder y (lower portion)
+  const scale = Math.min(W, H) * 0.40;
+  return { x: sx + px * scale, y: sy - py * scale };
+}
+
+// ─── CHART HISTORY (from background-training 'episode' messages) ─────────────
+const HIST = 200;
+let histReward   = new Array(HIST).fill(0);
+let histEntropy  = new Array(HIST).fill(0);
+let histGrad     = new Array(HIST).fill(0);
+let histMu1      = new Array(HIST).fill(0);
+let histSigmaArr = new Array(HIST).fill(1);
+let histPtr      = 0;
+let sigma0  = 1.0, mu0_ep1 = 0;
+let liveSigma = 1.0, liveMu = 0;
+
+// ─── DEMO STATE ────────────────────────────────────────────────────────────────
+// We always show the LATEST trained model. When a simulation finishes, we grab
+// the latest weights (now further trained) and show those — so over time each
+// run uses a more-trained model and visibly gets better, until it presses it.
+const L1 = 0.55, L2 = 0.45;
+const DEMO_DURATION = 4600;   // ms — how long each rollout takes to play
+const REST_DURATION = 1000;   // ms — pause between runs
+
+let demo          = null;     // demo currently being played
+let demoStart     = 0;
+let prevDemoPath  = null;     // faint ghost of the previous run, for comparison
+let phase         = 'init';   // 'init' | 'playing' | 'resting'
+let restUntil     = 0;
+let started       = false;
+
+// ─── WORKER ───────────────────────────────────────────────────────────────────
+let worker = null;
+if (IS_DESKTOP) {
+  worker = new Worker('worker.js');
+  worker.onmessage = onWorkerMessage;
+}
+
+function onWorkerMessage(e) {
+  const d = e.data;
+
+  if (d.type === 'episode') {
+    // Training runs continuously — update counters + charts
+    document.getElementById('ep-counter').textContent = `training · ep ${d.episode}`;
+    document.getElementById('m-ep').textContent       = d.episode;
+    document.getElementById('m-rw').textContent       = d.total_reward.toFixed(2);
+    document.getElementById('m-suc').textContent      = (d.success_rate * 100).toFixed(1) + '%';
+    document.getElementById('f-ep').textContent       = `EP ${d.episode}`;
+    document.getElementById('f-sigma').textContent    = `σ ${d.sigma.toFixed(3)}`;
+    document.getElementById('f-baseline').textContent = `baseline ${d.baseline.toFixed(2)}`;
+
+    histReward = d.hist_reward; histEntropy = d.hist_entropy;
+    histGrad = d.hist_grad_norm; histMu1 = d.hist_mu1;
+    histSigmaArr = d.hist_sigma; histPtr = d.hist_ptr;
+    liveSigma = d.sigma; liveMu = d.mu_last;
+    if (d.episode === 1) { sigma0 = d.sigma; mu0_ep1 = d.mu_last; }
+
+    if (!started) { started = true; phase = 'loading'; requestDemo(); }  // first run
+    return;
+  }
+
+  if (d.type === 'demo') {
+    demo = d;
+    demoStart = performance.now();
+    overlay.style.display = 'none';
+    phase = 'playing';
+    return;
+  }
+}
+
+// Ask the worker to roll out the LATEST trained model on a fresh button.
+function requestDemo() {
+  if (worker) worker.postMessage({ type: 'request_demo' });
+}
+
+// ─── FRAME SAMPLING (play a trajectory smoothly over a fixed duration) ───────
+function sampleFrame(frames, tnorm) {
+  if (frames.length === 1) return frames[0];
+  const fpos = tnorm * (frames.length - 1);
+  const i0 = Math.floor(fpos), i1 = Math.min(i0 + 1, frames.length - 1);
+  const f = fpos - i0;
+  const a = frames[i0], b = frames[i1];
+  return {
+    t1: a.t1 + (b.t1 - a.t1) * f,
+    t2: a.t2 + (b.t2 - a.t2) * f,
+    ex: a.ex + (b.ex - a.ex) * f,
+    ey: a.ey + (b.ey - a.ey) * f,
+    dist: a.dist + (b.dist - a.dist) * f,
+    idx: i1,
+  };
+}
+
+// ─── ARM DRAWING ──────────────────────────────────────────────────────────────
+function drawScene(pose, target, pathUpToIdx, ghostPath) {
+  const wrap = document.getElementById('canvas-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  armCtx.clearRect(0, 0, W, H);
+
+  // — Subtle grid —
+  armCtx.strokeStyle = 'rgba(196,199,199,0.18)';
+  armCtx.lineWidth = 0.5;
+  const gs = 32;
+  for (let x = 0; x < W; x += gs) { armCtx.beginPath(); armCtx.moveTo(x,0); armCtx.lineTo(x,H); armCtx.stroke(); }
+  for (let y = 0; y < H; y += gs) { armCtx.beginPath(); armCtx.moveTo(0,y); armCtx.lineTo(W,y); armCtx.stroke(); }
+
+  const shoulder = physToCanvas(0, 0);
+
+  // — Ghost of previous checkpoint's attempt (faint, dashed) —
+  if (ghostPath && ghostPath.length > 1) {
+    armCtx.strokeStyle = 'rgba(116,120,120,0.30)';
+    armCtx.lineWidth = 1;
+    armCtx.setLineDash([3, 3]);
+    armCtx.beginPath();
+    ghostPath.forEach((pt, i) => {
+      const c = physToCanvas(pt.x, pt.y);
+      i === 0 ? armCtx.moveTo(c.x, c.y) : armCtx.lineTo(c.x, c.y);
+    });
+    armCtx.stroke();
+    armCtx.setLineDash([]);
+  }
+
+  // — Current rollout trail up to the played frame (solid) —
+  if (pathUpToIdx && pathUpToIdx.length > 1) {
+    armCtx.strokeStyle = 'rgba(28,27,27,0.45)';
+    armCtx.lineWidth = 1.2;
+    armCtx.beginPath();
+    pathUpToIdx.forEach((pt, i) => {
+      const c = physToCanvas(pt.x, pt.y);
+      i === 0 ? armCtx.moveTo(c.x, c.y) : armCtx.lineTo(c.x, c.y);
+    });
+    armCtx.stroke();
+  }
+
+  if (!pose) { drawTarget(target); return; }
+
+  // — Kinematics —
+  const elbow = physToCanvas(Math.cos(pose.t1) * L1, Math.sin(pose.t1) * L1);
+  const ee    = physToCanvas(pose.ex, pose.ey);
+
+  // — Link 1 —
+  armCtx.strokeStyle = '#1c1b1b';
+  armCtx.lineCap = 'round';
+  armCtx.lineWidth = 3.5;
+  armCtx.beginPath();
+  armCtx.moveTo(shoulder.x, shoulder.y); armCtx.lineTo(elbow.x, elbow.y); armCtx.stroke();
+
+  // — Link 2 —
+  armCtx.lineWidth = 2.5;
+  armCtx.beginPath();
+  armCtx.moveTo(elbow.x, elbow.y); armCtx.lineTo(ee.x, ee.y); armCtx.stroke();
+
+  // — Joints —
+  armCtx.fillStyle = '#ffffff'; armCtx.strokeStyle = '#1c1b1b'; armCtx.lineWidth = 1.5;
+  armCtx.beginPath(); armCtx.arc(shoulder.x, shoulder.y, 5, 0, Math.PI*2); armCtx.fill(); armCtx.stroke();
+  armCtx.beginPath(); armCtx.arc(elbow.x, elbow.y, 4, 0, Math.PI*2); armCtx.fill(); armCtx.stroke();
+  armCtx.fillStyle = '#1c1b1b';
+  armCtx.beginPath(); armCtx.arc(ee.x, ee.y, 3.5, 0, Math.PI*2); armCtx.fill();
+
+  // — Dashed line ee → target —
+  const tgt = physToCanvas(target.x, target.y);
+  armCtx.strokeStyle = 'rgba(186,26,26,0.4)';
+  armCtx.lineWidth = 0.8;
+  armCtx.setLineDash([3, 4]);
+  armCtx.beginPath(); armCtx.moveTo(ee.x, ee.y); armCtx.lineTo(tgt.x, tgt.y); armCtx.stroke();
+  armCtx.setLineDash([]);
+  armCtx.fillStyle = 'rgba(186,26,26,0.75)';
+  armCtx.font = '8px JetBrains Mono';
+  armCtx.fillText(`d=${pose.dist.toFixed(2)}`, (ee.x+tgt.x)/2 + 4, (ee.y+tgt.y)/2 - 4);
+
+  // — Angle labels —
+  armCtx.fillStyle = '#5e5e5e';
+  armCtx.font = '9px JetBrains Mono';
+  armCtx.fillText(`θ₁=${(pose.t1*180/Math.PI).toFixed(0)}°`, shoulder.x + 8, shoulder.y - 10);
+  armCtx.fillText(`θ₂=${(pose.t2*180/Math.PI).toFixed(0)}°`, elbow.x + 6, elbow.y - 6);
+
+  drawTarget(target);
+
+  // — Reward watermark —
+  armCtx.fillStyle = 'rgba(116,120,120,0.12)';
+  armCtx.font = 'bold 10px JetBrains Mono';
+  armCtx.textAlign = 'right';
+  armCtx.fillText('r_t = 4·Δprog − c   ·   +10 on contact', W - 8, H - 8);
+  armCtx.textAlign = 'left';
+
+  // — Robot base —
+  armCtx.fillStyle = '#1c1b1b';
+  armCtx.fillRect(shoulder.x - 14, shoulder.y + 2, 28, 7);
+  armCtx.fillStyle = '#444748';
+  armCtx.fillRect(shoulder.x - 7, shoulder.y - 8, 14, 12);
+}
+
+function drawTarget(target) {
+  if (!target) return;
+  const tgt = physToCanvas(target.x, target.y);
+  const btnR = 16;
+  armCtx.fillStyle = '#fde8e8'; armCtx.strokeStyle = '#ba1a1a'; armCtx.lineWidth = 1.5;
+  armCtx.beginPath(); armCtx.arc(tgt.x, tgt.y, btnR, 0, Math.PI*2); armCtx.fill(); armCtx.stroke();
+  armCtx.fillStyle = '#ba1a1a';
+  armCtx.beginPath(); armCtx.arc(tgt.x, tgt.y, 9, 0, Math.PI*2); armCtx.fill();
+  armCtx.fillStyle = '#ba1a1a';
+  armCtx.font = '7px JetBrains Mono';
+  armCtx.textAlign = 'center';
+  armCtx.fillText('STOP', tgt.x, tgt.y + btnR + 9);
+  armCtx.textAlign = 'left';
+}
+
+// ─── BADGE (tell the viewer which policy they're watching) ───────────────────
+// `resultHtml` is the right-hand status: live "reaching" while the arm travels,
+// then the final REACHED/closest verdict once it arrives.
+function updateBadge(resultHtml) {
+  if (!demo) { badge.innerHTML = ''; return; }
+  badge.innerHTML =
+    `<div class="bp-ep">MODEL @ ${demo.episode.toLocaleString()} episodes</div>` +
+    `<div>${resultHtml}</div>`;
+}
+
+function finalResultHtml() {
+  return demo.success
+    ? `<span class="bp-hit">REACHED ✓</span>`
+    : `<span class="bp-miss">closest ${demo.min_dist.toFixed(2)}</span>`;
+}
+
+// ─── CHART DRAWING ────────────────────────────────────────────────────────────
+function getChartCtx(id) {
+  const el  = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  if (el._sized !== `${el.clientWidth}x${el.clientHeight}`) {
+    el.width  = el.clientWidth  * dpr;
+    el.height = el.clientHeight * dpr;
+    const cx  = el.getContext('2d');
+    cx.scale(dpr, dpr);
+    el._ctx   = cx;
+    el._sized = `${el.clientWidth}x${el.clientHeight}`;
+  }
+  return { ctx: el._ctx, W: el.clientWidth, H: el.clientHeight };
+}
+
+function drawLineChart(id, values, ptr, color, fillColor) {
+  const { ctx, W, H } = getChartCtx(id);
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(196,199,199,0.2)';
+  ctx.lineWidth = 0.5;
+  for (let i = 1; i < 4; i++) {
+    const y = H * i / 4;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Collect ordered values (circular buffer unwrap)
+  const N = values.length;
+  const ordered = [];
+  for (let i = 0; i < N; i++) ordered.push(values[(ptr + i) % N]);
+
+  // Find filled range (skip leading zeros unless all zeros)
+  let start = 0;
+  while (start < ordered.length - 1 && ordered[start] === 0) start++;
+  if (start === ordered.length - 1) return; // nothing to draw
+  const slice = ordered.slice(start);
+
+  const minV = Math.min(...slice);
+  const maxV = Math.max(...slice);
+  const range = maxV - minV || 1;
+
+  const toY = v => H - ((v - minV) / range) * (H - 4) - 2;
+  const toX = (i) => (i / (slice.length - 1)) * W;
+
+  // Fill
+  ctx.fillStyle = fillColor;
+  ctx.beginPath();
+  slice.forEach((v, i) => {
+    const x = toX(i), y = toY(v);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(toX(slice.length - 1), H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  // Line
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  slice.forEach((v, i) => {
+    const x = toX(i), y = toY(v);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function drawPolicyChart(id, mu, sigma, mu_ep1, sigma_ep1) {
+  const { ctx, W, H } = getChartCtx(id);
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(196,199,199,0.2)';
+  ctx.lineWidth = 0.5;
+  for (let i = 1; i < 4; i++) {
+    const y = H * i / 4;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // x range: mu ± 3*sigma (use max sigma for range)
+  const maxSig = Math.max(sigma, sigma_ep1, 0.1);
+  const xMin = Math.min(mu, mu_ep1) - 3 * maxSig;
+  const xMax = Math.max(mu, mu_ep1) + 3 * maxSig;
+
+  function gaussian(x, m, s) {
+    return Math.exp(-0.5 * ((x - m) / s) ** 2) / (s * Math.sqrt(2 * Math.PI));
+  }
+
+  function drawGaussian(m, s, color, alpha) {
+    const steps = W;
+    let maxY = 0;
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+      const xv = xMin + (i / steps) * (xMax - xMin);
+      const yv = gaussian(xv, m, s);
+      pts.push({ x: (i / steps) * W, y: yv });
+      if (yv > maxY) maxY = yv;
+    }
+    if (maxY === 0) return;
+    ctx.strokeStyle = color.replace(')', `,${alpha})`).replace('rgb', 'rgba');
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const y = H - (p.y / maxY) * (H - 4) - 2;
+      if (i === 0) ctx.moveTo(p.x, y); else ctx.lineTo(p.x, y);
+    });
+    ctx.stroke();
+  }
+
+  // Episode 1 reference (faded)
+  drawGaussian(mu_ep1, sigma_ep1, 'rgb(116,120,120)', 0.3);
+  // Current policy
+  drawGaussian(mu,     sigma,     'rgb(28,27,27)',    1.0);
+
+  // μ label
+  ctx.fillStyle = '#5e5e5e';
+  ctx.font = '8px JetBrains Mono';
+  ctx.fillText(`μ=${mu.toFixed(2)} σ=${sigma.toFixed(2)}`, 3, H - 3);
+}
+
+// ─── RENDER LOOP ──────────────────────────────────────────────────────────────
+function render() {
+  const now = performance.now();
+
+  if (phase === 'playing' && demo) {
+    const elapsed = now - demoStart;
+    const tnorm = Math.min(1, elapsed / DEMO_DURATION);
+    const pose = sampleFrame(demo.frames, tnorm);
+    const trail = demo.frames.slice(0, pose.idx + 1).map(f => ({ x: f.ex, y: f.ey }));
+    drawScene(pose, demo.target, trail, prevDemoPath);
+
+    // Reveal the verdict only once the arm has essentially arrived; otherwise
+    // show the live closing distance so the approach reads as suspense.
+    const arrived = tnorm > 0.92;
+    updateBadge(arrived ? finalResultHtml() : `reaching · d=${pose.dist.toFixed(2)}`);
+
+    liveDist = pose.dist;
+    document.getElementById('m-dist').textContent = pose.dist.toFixed(3);
+
+    if (elapsed >= DEMO_DURATION) {
+      updateBadge(finalResultHtml());
+      // Remember this run's path as a faint ghost behind the next (better) run
+      prevDemoPath = demo.frames.map(f => ({ x: f.ex, y: f.ey }));
+      phase = 'resting';
+      restUntil = now + REST_DURATION;
+      overlay.textContent = demo.success ? 'reached ✓ — loading latest model…' : 'loading latest model…';
+      overlay.style.display = 'flex';
+    }
+  } else if (phase === 'resting') {
+    if (now >= restUntil) {
+      overlay.style.display = 'none';
+      phase = 'loading';
+      requestDemo();   // grab the LATEST (further-trained) model and run it
+    }
+  } else if (phase === 'init') {
+    // Waiting for training to start — blank grid
+    drawScene(null, null, null, null);
+  }
+
+  // Mini charts (always reflect live background training)
+  drawLineChart('chart-reward',  histReward,  histPtr, '#1c1b1b', 'rgba(28,27,27,0.06)');
+  drawLineChart('chart-entropy', histEntropy, histPtr, '#5e5e5e', 'rgba(94,94,94,0.06)');
+  drawLineChart('chart-grad',    histGrad,    histPtr, '#747878', 'rgba(116,120,120,0.06)');
+  drawPolicyChart('chart-policy', liveMu, liveSigma, mu0_ep1, sigma0);
+
+  requestAnimationFrame(render);
+}
+if (IS_DESKTOP) requestAnimationFrame(render);
+
+// ─── SLIDERS ──────────────────────────────────────────────────────────────────
+// α: log scale 1e-5 to 1e-2
+function sliderToAlpha(v) { return Math.pow(10, -5 + v * 3); }  // v∈[0,1] → [1e-5, 1e-2]
+function alphaToSlider(a) { return (Math.log10(a) + 5) / 3; }
+
+function fmtAlpha(v) {
+  if (v < 0.001) return v.toExponential(1);
+  return v.toFixed(4);
+}
+
+function post(msg) { if (worker) worker.postMessage(msg); }
+
+document.getElementById('sl-alpha').addEventListener('input', function() {
+  const a = sliderToAlpha(+this.value);
+  document.getElementById('sv-alpha').textContent = fmtAlpha(a);
+  post({ type: 'set_alpha', value: a });
+});
+
+document.getElementById('sl-gamma').addEventListener('input', function() {
+  const g = 0.8 + +this.value * 0.199;
+  document.getElementById('sv-gamma').textContent = g.toFixed(3);
+  post({ type: 'set_gamma', value: g });
+});
+
+document.getElementById('sl-beta').addEventListener('input', function() {
+  const b = +this.value * 0.1;
+  document.getElementById('sv-beta').textContent = b.toFixed(3);
+  post({ type: 'set_beta', value: b });
+});
+
+document.getElementById('btn-dense').addEventListener('click', function() {
+  this.classList.add('active');
+  document.getElementById('btn-sparse').classList.remove('active');
+  post({ type: 'set_dense', value: true });
+});
+
+document.getElementById('btn-sparse').addEventListener('click', function() {
+  this.classList.add('active');
+  document.getElementById('btn-dense').classList.remove('active');
+  post({ type: 'set_dense', value: false });
+});
+
+// Init slider display value to match the worker's default α
+document.getElementById('sv-alpha').textContent = fmtAlpha(sliderToAlpha(0.9));
+</script>
+</body>
+</html>
