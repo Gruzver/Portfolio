@@ -1,4 +1,5 @@
 import * as db from './db.js';
+import { createSync } from './sync.js';
 import { createEditor } from './editor.js';
 import { CENTER, distanceKm } from './geo.js';
 import { el, money, inCzk, safeUrl, toast, STATUS, STAY_MONTHS } from './dom.js';
@@ -91,6 +92,33 @@ function drawPois() {
 }
 
 const editor = createEditor();
+
+// Server sync (only active when the app is served by server/server.py).
+const syncLabel = {
+  syncing: () => '↻ Sincronizando con tu servidor…',
+  ok: ({ lastSync }) => `☁ Sincronizado con tu servidor · ${new Date(lastSync).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`,
+  offline: () => '⚠ Sin conexión con el servidor. Los cambios se guardan aquí y se enviarán al reconectar.',
+};
+const PRIVACY_LOCAL = 'Todo se procesa en tu navegador y se guarda solo en este dispositivo. Las capturas no se suben a ningún servidor; solo se envía a OpenStreetMap el texto de la dirección para ubicarla en el mapa.';
+const PRIVACY_SERVER = 'Todo se procesa en tu navegador. Los anuncios se guardan en este dispositivo y en tu servidor privado. Las capturas no se suben a ningún otro sitio; solo se envía a OpenStreetMap el texto de la dirección para ubicarla en el mapa.';
+const sync = createSync({
+  db,
+  onChange: async () => {
+    const wasEmpty = listings.length === 0;
+    listings = await db.loadAll();
+    render();
+    if (wasEmpty && listings.length) $('fit-btn').click(); // first listings arriving on a new device
+    const open = listings.find((l) => l.id === selectedId);
+    if (open) renderDrawer(open);
+  },
+  onStatus: (s) => {
+    const line = $('sync-status');
+    line.hidden = s.state === 'disabled';
+    line.dataset.state = s.state;
+    if (s.state !== 'disabled') line.textContent = syncLabel[s.state](s);
+    document.querySelector('.privacy').textContent = s.state === 'disabled' ? PRIVACY_LOCAL : PRIVACY_SERVER;
+  },
+});
 let listings = [];
 let selectedId = null;
 const markers = new Map();
@@ -194,6 +222,7 @@ function renderDrawer(l) {
     l.status = e.target.value;
     l.updatedAt = Date.now();
     await db.save(l);
+    sync.schedule();
     render();
     renderDrawer(l);
   } }, Object.entries(STATUS).map(([v, label]) => el('option', { value: v, selected: v === (l.status || 'new') }, label)));
@@ -270,6 +299,7 @@ $('lightbox').addEventListener('keydown', (e) => {
 // ---- data actions -------------------------------------------------------------------------
 async function upsert(listing) {
   await db.save(listing);
+  sync.schedule();
   const i = listings.findIndex((l) => l.id === listing.id);
   if (i >= 0) listings[i] = listing; else listings.push(listing);
 }
@@ -285,6 +315,7 @@ async function edit(l) {
 async function removeListing(l) {
   if (!confirm(`¿Eliminar «${l.title}»?`)) return;
   await db.remove(l.id);
+  sync.schedule();
   listings = listings.filter((x) => x.id !== l.id);
   closeDrawer();
   toast('Anuncio eliminado.');
@@ -377,7 +408,15 @@ $('import-input').addEventListener('change', async (e) => {
     const data = JSON.parse(await file.text());
     const incoming = (Array.isArray(data) ? data : data.listings || []).filter((l) => l && l.id && Number.isFinite(l.lat) && Number.isFinite(l.lng));
     if (!incoming.length) throw new Error('vacío');
-    for (const l of incoming) await upsert({ photos: [], conditions: [], status: 'new', createdAt: Date.now(), ...l });
+    // a listing deleted here earlier and imported again means "bring it back": without a fresh
+    // updatedAt the older timestamp in the file would lose against the deletion during sync
+    const deletedHere = new Set((await db.loadTombstones()).map((t) => t.id));
+    for (const l of incoming) {
+      await upsert({
+        photos: [], conditions: [], status: 'new', createdAt: Date.now(), updatedAt: Date.now(), ...l,
+        ...(deletedHere.has(l.id) ? { updatedAt: Date.now() } : {}),
+      });
+    }
     render();
     $('fit-btn').click();
     toast(`${incoming.length} anuncio(s) importados.`);
@@ -396,6 +435,7 @@ $('import-input').addEventListener('change', async (e) => {
   $('storage-warning').hidden = db.persistent;
   render();
   if (listings.length) $('fit-btn').click();
+  sync.start();
   refinePois().then((moved) => {
     if (!moved) return;
     drawPois();
