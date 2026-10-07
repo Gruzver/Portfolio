@@ -2,18 +2,93 @@ import * as db from './db.js';
 import { createEditor } from './editor.js';
 import { CENTER, distanceKm } from './geo.js';
 import { el, money, inCzk, safeUrl, toast, STATUS, STAY_MONTHS } from './dom.js';
+import { POIS, applyCachedPois, refinePois, distancesTo, fmtKm } from './places.js';
 
 const $ = (id) => document.getElementById(id);
 const PRAGUE = [50.0755, 14.4378];
 
-const map = L.map('map', { zoomControl: true }).setView(PRAGUE, 12);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* storage blocked */ } },
+};
+
+const OSM_LINK = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+const streets = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: `© ${OSM_LINK}` });
+// ÖPNVKarte (memomaps.de): the same OSM data styled to show metro, tram, bus and train lines with their names.
+const transit = L.tileLayer('https://tileserver.memomaps.de/tilegen/{z}/{x}/{y}.png', {
+  maxNativeZoom: 18,
   maxZoom: 19,
-  attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
-}).addTo(map);
+  attribution: `Map © <a href="https://memomaps.de/" target="_blank" rel="noopener">memomaps.de</a> <a href="https://creativecommons.org/licenses/by-sa/2.0/" target="_blank" rel="noopener">CC-BY-SA</a>, data © ${OSM_LINK} contributors`,
+});
+
+const map = L.map('map', { zoomControl: true, maxZoom: 19 }).setView(PRAGUE, 12);
 L.circleMarker([CENTER.lat, CENTER.lng], { radius: 6, weight: 2, color: '#1f2937', fillColor: '#fff', fillOpacity: 1 })
   .bindTooltip(`Centro · ${CENTER.label}`, { direction: 'top' })
   .addTo(map);
+
+// Extra buttons under the zoom control.
+function mapButton(glyph, title, onClick) {
+  const Control = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd() {
+      const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+      const a = L.DomUtil.create('a', 'map-btn', bar);
+      a.href = '#';
+      a.setAttribute('role', 'button');
+      a.title = title;
+      a.setAttribute('aria-label', title);
+      a.textContent = glyph;
+      L.DomEvent.disableClickPropagation(bar);
+      L.DomEvent.on(a, 'click', (e) => { L.DomEvent.preventDefault(e); onClick(a); });
+      return bar;
+    },
+  });
+  const control = new Control();
+  control.addTo(map);
+  return control.getContainer().querySelector('a');
+}
+
+const appEl = document.querySelector('.app');
+function setSidebar(hidden) {
+  appEl.classList.toggle('collapsed', hidden);
+  sidebarBtn.setAttribute('aria-pressed', String(!hidden));
+  sidebarBtn.title = hidden ? 'Mostrar la lista' : 'Ocultar la lista';
+  sidebarBtn.setAttribute('aria-label', sidebarBtn.title);
+  store.set('prm.sidebar', hidden ? 'hidden' : 'shown');
+  setTimeout(() => map.invalidateSize(), 60);
+}
+const sidebarBtn = mapButton('☰', 'Ocultar la lista', () => setSidebar(!appEl.classList.contains('collapsed')));
+mapButton('＋', 'Añadir una captura', () => $('file-input').click());
+
+const TRANSIT_OFF = 'Ver líneas de metro, tranvía, bus y tren';
+function setTransit(on) {
+  if (on) { map.removeLayer(streets); transit.addTo(map); } else { map.removeLayer(transit); streets.addTo(map); }
+  transitBtn.classList.toggle('active', on);
+  transitBtn.setAttribute('aria-pressed', String(on));
+  transitBtn.title = on ? 'Volver al mapa de calles' : TRANSIT_OFF;
+  transitBtn.setAttribute('aria-label', transitBtn.title);
+  store.set('prm.transit', on ? '1' : '0');
+}
+const transitBtn = mapButton('🚇', TRANSIT_OFF, () => setTransit(!transitBtn.classList.contains('active')));
+
+// Workplaces: always on the map, never filtered.
+const poiMarkers = new Map();
+function drawPois() {
+  for (const p of POIS) {
+    const existing = poiMarkers.get(p.id);
+    if (existing) { existing.setLatLng([p.lat, p.lng]); continue; }
+    const popup = el('div', { class: 'poi-pop' },
+      el('strong', {}, p.name),
+      el('div', {}, p.address),
+      el('a', { href: `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`, target: '_blank', rel: 'noopener noreferrer' }, 'Google Maps'));
+    const marker = L.marker([p.lat, p.lng], {
+      icon: L.divIcon({ className: 'pin', html: el('span', { class: 'poi' }, `💼 ${p.short}`), iconSize: [0, 0] }),
+      title: `${p.name} · ${p.address}`,
+      zIndexOffset: 500,
+    }).bindPopup(popup).addTo(map);
+    poiMarkers.set(p.id, marker);
+  }
+}
 
 const editor = createEditor();
 let listings = [];
@@ -23,7 +98,6 @@ const markerLayer = L.layerGroup().addTo(map);
 
 // ---- helpers ----------------------------------------------------------------------------
 const kmToCenter = (l) => distanceKm(l, CENTER);
-const fmtKm = (km) => `${km.toFixed(1).replace('.', ',')} km`;
 
 function visible() {
   const hide = $('hide-discarded').checked;
@@ -33,6 +107,8 @@ function visible() {
     recent: (a, b) => b.createdAt - a.createdAt,
     'price-asc': (a, b) => inCzk(a.price, a.currency) - inCzk(b.price, b.currency),
     'price-desc': (a, b) => inCzk(b.price, b.currency) - inCzk(a.price, a.currency),
+    f4f: (a, b) => distanceKm(a, POIS[0]) - distanceKm(b, POIS[0]),
+    mrs: (a, b) => distanceKm(a, POIS[1]) - distanceKm(b, POIS[1]),
     center: (a, b) => kmToCenter(a) - kmToCenter(b),
   }[sort];
   return list.sort(by);
@@ -84,7 +160,7 @@ function itemFor(l) {
         el('strong', { class: 'item-price' }, l.price != null ? money(l.price, l.currency) : 'Precio ¿?'),
         el('span', { class: 'item-title' }, l.title),
         el('span', { class: 'item-meta' },
-          `${fmtKm(kmToCenter(l))} del centro`,
+          distancesTo(l).map((d) => `${d.short} ${fmtKm(d.km)}`).join(' · '),
           l.status && l.status !== 'new' ? ` · ${STATUS[l.status]}` : '',
           l.precision === 'area' ? ' · ubicación aproximada' : ''))));
 }
@@ -131,7 +207,8 @@ function renderDrawer(l) {
     el('div', { class: 'dr-scroll' },
       chips.length ? el('ul', { class: 'chips' }, chips) : null,
       el('p', { class: 'where' },
-        `📍 ${l.address || 'Sin dirección'} · ${fmtKm(kmToCenter(l))} del centro`,
+        `📍 ${l.address || 'Sin dirección'}`,
+        el('span', { class: 'dist' }, `En línea recta: ${[...distancesTo(l).map((d) => `${d.short} ${fmtKm(d.km)}`), `centro ${fmtKm(kmToCenter(l))}`].join(' · ')}`),
         l.precision === 'area' ? el('em', {}, ' Ubicación aproximada: el anuncio solo indicaba la zona.') : null),
       l.photos?.length
         ? el('div', { class: 'photos' }, l.photos.map((src, i) => el('button', { type: 'button', class: 'photo', 'aria-label': `Ver foto ${i + 1}`, onclick: () => openLightbox(l.photos, i) }, el('img', { src, alt: `Foto ${i + 1}`, loading: 'lazy' }))))
@@ -276,6 +353,8 @@ $('hide-discarded').addEventListener('change', render);
 $('fit-btn').addEventListener('click', () => {
   const pts = visible().map((l) => [l.lat, l.lng]);
   if (!pts.length) { map.setView(PRAGUE, 12); return; }
+  // keep the workplaces in frame so each listing can be judged against them
+  pts.push(...POIS.map((p) => [p.lat, p.lng]));
   map.fitBounds(L.latLngBounds(pts).pad(0.25), { maxZoom: 16 });
 });
 
@@ -309,8 +388,19 @@ $('import-input').addEventListener('change', async (e) => {
 
 // ---- start -------------------------------------------------------------------------------------
 (async () => {
+  setTransit(store.get('prm.transit') === '1');
+  setSidebar(store.get('prm.sidebar') === 'hidden');
+  applyCachedPois();
+  drawPois();
   listings = await db.loadAll();
   $('storage-warning').hidden = db.persistent;
   render();
   if (listings.length) $('fit-btn').click();
+  refinePois().then((moved) => {
+    if (!moved) return;
+    drawPois();
+    render();
+    const open = listings.find((l) => l.id === selectedId);
+    if (open) renderDrawer(open);
+  });
 })();

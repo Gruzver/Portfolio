@@ -123,3 +123,15 @@ test('availability as a month range in Czech and English', () => {
   assert.equal(parseListing('Available from September to January').available, 'September–January');
   assert.equal(parseListing('Volné od 1.12.').available, '1.12');
 });
+
+test('workplace points: both are near the centre of Prague and close to each other', async () => {
+  const { POIS, distancesTo, fmtKm } = await import('../js/places.js');
+  assert.deepEqual(POIS.map((p) => p.short), ['F4F', 'MRS']);
+  const [f4f, mrs] = POIS;
+  const between = distancesTo(f4f).find((d) => d.id === 'mrs').km;
+  assert.ok(between > 0.2 && between < 0.8, `F4F-MRS ${between}`);
+  const fromCentre = distancesTo({ lat: 50.0875, lng: 14.4213 });
+  assert.ok(fromCentre.every((d) => d.km > 0.3 && d.km < 1.5), JSON.stringify(fromCentre));
+  assert.equal(fmtKm(1.26), '1,3 km');
+  assert.ok(mrs.address.includes('Karlovo'));
+});

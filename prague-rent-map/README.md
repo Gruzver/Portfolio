@@ -16,6 +16,9 @@ No necesita servidor, cuenta ni claves de API.
 - Se abre una ventana con la captura y el formulario ya rellenado. **Revisa los datos**: el OCR no es perfecto.
   - Recuadros verdes = fotos detectadas. Púlsalos para quitarlos o incluirlos; arrastra sobre la captura para recortar otra.
   - Si la ubicación no es la correcta, escribe otra dirección y pulsa «Buscar en el mapa», haz clic en el mapa o arrastra el pin.
+- **Lista oculta:** el botón ☰ del mapa oculta o muestra la barra izquierda (se recuerda). El botón ＋ del mapa permite añadir una captura aunque la lista esté oculta.
+- **F4F y MRS** (💼) están siempre en el mapa; sus direcciones están en `js/places.js`. Cada anuncio muestra la distancia **en línea recta** a ambos y al centro, y la lista se puede ordenar por cercanía a F4F o a MRS.
+- **Transporte público:** el botón 🚇 cambia el mapa a la ÖPNVKarte, que dibuja las líneas de metro, tranvía, bus y tren con sus nombres. Se recuerda la elección.
 - Cada anuncio puede marcarse como *Por revisar, Favorito, Contactado o Descartado*.
 - El detalle avisa cuando el contrato mínimo es más largo que tu estancia (5 meses, constante `STAY_MONTHS` en `js/dom.js`) y calcula el coste estimado de esos meses.
 - **Exportar copia / Importar copia** guarda y recupera todo en un archivo JSON. Úsalo como copia de seguridad: los datos viven solo en el navegador (IndexedDB) y se pierden si borras los datos del sitio.
@@ -26,8 +29,8 @@ No necesita servidor, cuenta ni claves de API.
 
 Las capturas y las fotos **no salen del navegador**. Lo único que se envía fuera es:
 
-- el texto de la dirección, a `nominatim.openstreetmap.org`, para ubicarla;
-- las peticiones normales de teselas del mapa a `tile.openstreetmap.org`.
+- el texto de la dirección, a `nominatim.openstreetmap.org`, para ubicarla (y, una sola vez, las direcciones de F4F y MRS para afinar su posición);
+- las peticiones normales de teselas del mapa a `tile.openstreetmap.org` (o a `tileserver.memomaps.de` si activas la capa de transporte).
 
 ## Despliegue
 
@@ -57,6 +60,7 @@ node --test tests/parse.test.mjs tests/photos.test.mjs   # tests unitarios
 | `js/parse.js` | Texto OCR → campos (precio, fianza, dirección, condiciones…) |
 | `js/geo.js` | Nominatim + tabla offline de barrios de Praga como alternativa |
 | `js/photos.js` | Detección y recorte de fotos dentro de la captura |
+| `js/places.js` | F4F y MRS: posiciones, distancias |
 | `js/ocr.js`, `js/db.js`, `js/dom.js` | Tesseract.js, IndexedDB, utilidades |
 | `assets/ejemplo-anuncio.png` | Captura ficticia para probar |
 | `vendor/` | Leaflet y Tesseract.js copiados en el repo (sin CDN); ver `vendor/README.md` |
@@ -66,4 +70,7 @@ node --test tests/parse.test.mjs tests/photos.test.mjs   # tests unitarios
 - El OCR falla más con capturas pequeñas, borrosas o con texto sobre fotos. Hay un botón para releer con más zoom y el texto leído se puede editar y volver a analizar.
 - La detección automática de fotos busca bloques rectangulares sobre el fondo de la página; si la captura incluye otros elementos coloridos (mapas, vistas previas de enlaces) también los marcará. Basta con quitarlos.
 - Los anuncios que no publican la dirección exacta solo se pueden ubicar de forma aproximada.
+- Las distancias son en línea recta, no tiempos de viaje. Para eso, usa la capa de transporte y mira las líneas cercanas.
+- La capa de transporte la sirve un servidor comunitario (memomaps.de) pensado para un uso moderado: si va lento o no carga, vuelve al mapa de calles.
+- Las posiciones de F4F y MRS son aproximadas hasta que Nominatim las confirma; si la confirmación cae a más de 700 m de lo esperado se descarta.
 - Las tasas EUR/USD → CZK (25 y 23) solo se usan para ordenar la lista por precio.
