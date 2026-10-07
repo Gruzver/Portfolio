@@ -7,6 +7,8 @@
 #   RENTMAP_DATA       where listings/backups are kept   (default ~/rent-map-data)
 #   RENTMAP_BIND       fixed IP instead of auto-detection (handy for testing: 127.0.0.1)
 #   RENTMAP_WAIT_SECS  seconds between interface checks   (default 5; tries 60 times)
+#   RENTMAP_NGROK_DOMAIN  your ngrok domain (name.ngrok-free.app): accepted as a valid Host
+#   RENTMAP_ALLOW_HOST    other Host names to accept, comma separated
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,4 +33,14 @@ if [ -z "$IP" ]; then
 fi
 
 mkdir -p "$DATA"
-exec "$PY" "$HERE/server.py" --bind "$IP" --port "$PORT" --data "$DATA"
+
+# Host names the server accepts besides the bind IP and localhost (needed when a tunnel forwards
+# requests that carry its public name in the Host header)
+EXTRA=()
+[ -n "${RENTMAP_NGROK_DOMAIN:-}" ] && EXTRA+=(--allow-host "$RENTMAP_NGROK_DOMAIN")
+if [ -n "${RENTMAP_ALLOW_HOST:-}" ]; then
+  IFS=',' read -ra HOSTS <<< "$RENTMAP_ALLOW_HOST"
+  for h in "${HOSTS[@]}"; do [ -n "$h" ] && EXTRA+=(--allow-host "$h"); done
+fi
+
+exec "$PY" "$HERE/server.py" --bind "$IP" --port "$PORT" --data "$DATA" ${EXTRA[@]+"${EXTRA[@]}"}

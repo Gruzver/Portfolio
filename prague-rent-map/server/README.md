@@ -87,6 +87,27 @@ Cada dirección web es un "sitio" distinto para el navegador, así que lo guarda
 - Usa la hora de cada dispositivo. Si dos dispositivos tuvieran el reloj muy desfasado y editaras el mismo anuncio en ambos casi a la vez, podría ganar el equivocado. Para una sola persona es un riesgo pequeño.
 - Si importas un anuncio que habías borrado antes en ese dispositivo, se entiende como "tráelo de vuelta".
 
+## Exponerlo a internet con ngrok (opcional)
+
+Solo si necesitas entrar desde un dispositivo que no tiene ZeroTier. **Sin inicio de sesión, cualquiera que tenga la dirección puede leer, editar y borrar todos los anuncios** (con capturas y teléfonos de terceros). Úsalo sabiéndolo, y puedes abrir el túnel solo cuando haga falta.
+
+El servidor sigue escuchando **solo en la IP de ZeroTier**. El programa de ngrok corre en la misma laptop y se conecta a él desde dentro, así que no se abre ningún puerto en el router.
+
+1. Crea una cuenta gratuita en ngrok. En su panel verás tu **dominio** gratuito (algo como `nombre.ngrok-free.app`) y tu **authtoken**.
+2. Instala ngrok en la laptop siguiendo https://ngrok.com/download/linux y registra el token **a mano en tu terminal**: `ngrok config add-authtoken <TU_TOKEN>`. No lo pegues en chats ni en archivos del repo.
+3. Declara tu dominio para el servidor y para el túnel, **una vez**, en la parte de arriba del `crontab` (`crontab -e`), antes de las líneas `@reboot`:
+   ```
+   RENTMAP_NGROK_DOMAIN=nombre.ngrok-free.app
+   @reboot $HOME/rent-map-app/prague-rent-map/server/run.sh >> $HOME/rent-map-data/server.log 2>&1
+   @reboot $HOME/rent-map-app/prague-rent-map/server/ngrok.sh >> $HOME/rent-map-data/ngrok.log 2>&1
+   ```
+   `run.sh` acepta ese nombre como `Host` válido y `ngrok.sh` abre el túnel hacia la IP de ZeroTier cuando el servidor ya responde. Para probarlo a mano sin reiniciar: `RENTMAP_NGROK_DOMAIN=nombre.ngrok-free.app ~/rent-map-app/prague-rent-map/server/ngrok.sh` (reinicia antes `run.sh` con la misma variable).
+4. Abre `https://nombre.ngrok-free.app/`. La primera vez ngrok muestra una página de aviso: pulsa para continuar (se recuerda 7 días).
+
+Cosas que conviene saber del plan gratuito (según su documentación): 1 GB de salida y 20 000 peticiones HTTP al mes. Por eso, cuando entras por internet la web sincroniza cada 5 minutos en vez de cada 30 segundos, y los cambios que haces siguen enviándose al momento. Los archivos pesados (`vendor/`, `assets/`) se guardan un día en el navegador para gastar menos peticiones. Todo el tráfico pasa por los servidores de ngrok.
+
+Para cerrar el acceso público basta con borrar la línea de `ngrok.sh` del `crontab` y parar el proceso `ngrok`.
+
 ## Seguridad: qué hace y qué no
 
 - Solo escucha en la IP que le das; con `0.0.0.0` se niega salvo `--allow-any-interface`.
@@ -102,10 +123,13 @@ Cada dirección web es un "sitio" distinto para el navegador, así que lo guarda
 | La web dice «Sin conexión con el servidor» | ¿ZeroTier conectado en ese dispositivo? ¿La laptop encendida? `curl http://<IP>:8789/api/ping` desde otra máquina de la red. Los cambios se guardan en el dispositivo y se envían al volver. |
 | No arranca tras reiniciar | Mira `~/rent-map-data/server.log`. Si dice que no encontró interfaz ZeroTier, comprueba `systemctl status zerotier-one` y `ip -4 -brief addr`. |
 | Cambió la IP de ZeroTier | Nada: se resuelve en cada arranque. Solo hay que usar la IP nueva en el navegador. |
+| ngrok dice que el dominio no es válido o no conecta | Comprueba `ngrok http --help` (los agentes recientes usan `--url`, los antiguos `--domain`; `ngrok.sh` prueba los dos), que el token está registrado y `~/rent-map-data/ngrok.log`. |
+| Por internet sale "host not allowed" (403) | El dominio de `RENTMAP_NGROK_DOMAIN` no coincide con el que usas, o reiniciaste ngrok pero no `run.sh` con la variable. |
 | El puerto está ocupado | Cambia `RENTMAP_PORT` (8787 y 8788 los usan otros servicios tuyos). |
 
 ## Pruebas
 
 ```sh
 python3 -m unittest discover -s server -v
+bash server/test_launchers.sh
 ```
