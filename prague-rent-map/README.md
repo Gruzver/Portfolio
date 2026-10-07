@@ -21,13 +21,14 @@ No necesita servidor, cuenta ni claves de API.
 - **Transporte público:** el botón 🚇 cambia el mapa a la ÖPNVKarte, que dibuja las líneas de metro, tranvía, bus y tren con sus nombres. Se recuerda la elección.
 - Cada anuncio puede marcarse como *Por revisar, Favorito, Contactado o Descartado*.
 - El detalle avisa cuando el contrato mínimo es más largo que tu estancia (5 meses, constante `STAY_MONTHS` en `js/dom.js`) y calcula el coste estimado de esos meses.
-- **Exportar copia / Importar copia** guarda y recupera todo en un archivo JSON. Úsalo como copia de seguridad: los datos viven solo en el navegador (IndexedDB) y se pierden si borras los datos del sitio.
+- **Exportar copia / Importar copia** guarda y recupera todo en un archivo JSON. Úsalo como copia de seguridad: sin servidor propio, los datos viven solo en el navegador (IndexedDB) y se pierden si borras los datos del sitio.
+- **Servidor propio (opcional):** si ejecutas `server/server.py` en una máquina de tu red privada, todos tus dispositivos ven la misma lista y se sincronizan solos, también tras quedarse sin conexión. Ver [`server/README.md`](server/README.md). Sin servidor, la app funciona igual que siempre, solo local.
 
 > Muchos anuncios solo dicen el barrio («Vinohrady, Praha 2»). En ese caso el pin queda marcado como **aproximado** (`≈` y borde discontinuo) para que no se confunda con una dirección exacta.
 
 ## Privacidad
 
-Las capturas y las fotos **no salen del navegador**. Lo único que se envía fuera es:
+Las capturas y las fotos **no salen del navegador** (ni de tu red, si usas el servidor propio, donde se guardan en tu máquina). Lo único que se envía fuera es:
 
 - el texto de la dirección, a `nominatim.openstreetmap.org`, para ubicarla (y, una sola vez, las direcciones de F4F y MRS para afinar su posición);
 - las peticiones normales de teselas del mapa a `tile.openstreetmap.org` (o a `tileserver.memomaps.de` si activas la capa de transporte).
@@ -61,6 +62,8 @@ node --test tests/parse.test.mjs tests/photos.test.mjs   # tests unitarios
 | `js/geo.js` | Nominatim + tabla offline de barrios de Praga como alternativa |
 | `js/photos.js` | Detección y recorte de fotos dentro de la captura |
 | `js/places.js` | F4F y MRS: posiciones, distancias |
+| `js/sync.js` | Sincronización con el servidor propio (opcional) |
+| `server/` | Servidor propio en Python: sirve la web y guarda los anuncios; ver su README |
 | `js/ocr.js`, `js/db.js`, `js/dom.js` | Tesseract.js, IndexedDB, utilidades |
 | `assets/ejemplo-anuncio.png` | Captura ficticia para probar |
 | `vendor/` | Leaflet y Tesseract.js copiados en el repo (sin CDN); ver `vendor/README.md` |
