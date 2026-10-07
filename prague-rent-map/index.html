@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alquiler en Praga · mapa de anuncios</title>
+  <meta name="description" content="Sube una captura de un anuncio de alquiler y mira dónde está en el mapa de Praga, con precio, condiciones y fotos.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📍%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Anuncios guardados">
+      <header class="brand">
+        <h1>Alquiler en Praga</h1>
+        <p>Sube la captura de un anuncio y mira dónde está, cuánto cuesta y en qué condiciones.</p>
+      </header>
+
+      <label class="dropzone" id="dropzone" tabindex="0">
+        <input id="file-input" type="file" accept="image/*" multiple hidden>
+        <strong>Arrastra una captura aquí</strong>
+        <span>o pégala con <kbd>Ctrl</kbd>+<kbd>V</kbd> · o haz clic para elegir archivos</span>
+      </label>
+      <button type="button" class="linkish" id="sample-btn">Probar con una captura de ejemplo (datos ficticios)</button>
+
+      <div class="toolbar">
+        <span id="count" aria-live="polite">0 anuncios</span>
+        <select id="sort" aria-label="Ordenar">
+          <option value="recent">Más recientes</option>
+          <option value="price-asc">Precio ↑</option>
+          <option value="price-desc">Precio ↓</option>
+          <option value="center">Cerca del centro</option>
+        </select>
+        <button type="button" id="fit-btn" title="Ajustar el mapa para ver todos">Ver todos</button>
+      </div>
+      <label class="check"><input type="checkbox" id="hide-discarded" checked> Ocultar descartados</label>
+
+      <ul class="list" id="list"></ul>
+      <p class="empty" id="empty">Aún no hay anuncios. Sube tu primera captura.</p>
+
+      <footer class="foot">
+        <div class="foot-actions">
+          <button type="button" id="export-btn">Exportar copia</button>
+          <button type="button" id="import-btn">Importar copia</button>
+          <input id="import-input" type="file" accept="application/json" hidden>
+        </div>
+        <p id="storage-warning" class="warn" hidden>Tu navegador bloquea el almacenamiento local: los anuncios se perderán al cerrar la página. Exporta una copia.</p>
+        <p class="privacy">Todo se procesa en tu navegador y se guarda solo en este dispositivo. Las capturas no se suben a ningún servidor; solo se envía a OpenStreetMap el texto de la dirección para ubicarla en el mapa.</p>
+      </footer>
+    </aside>
+
+    <main class="mapwrap">
+      <div id="map" role="application" aria-label="Mapa de Praga con los anuncios"></div>
+      <aside id="drawer" class="drawer" hidden aria-live="polite"></aside>
+    </main>
+  </div>
+
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="editor-form" novalidate>
+      <header class="ed-head">
+        <h2 id="editor-title">Nuevo anuncio</h2>
+        <button type="button" class="icon-btn" id="ed-close" aria-label="Cerrar">✕</button>
+      </header>
+      <div class="ed-body">
+        <section class="ed-shot" id="ed-shot-section">
+          <div class="ocr-status" id="ocr-status" aria-live="polite">
+            <progress id="ocr-bar" max="1" value="0"></progress>
+            <span id="ocr-text">Preparando…</span>
+          </div>
+          <div class="shot-scroll">
+            <div class="shot-stage" id="shot-stage"><div class="shot-overlay" id="shot-overlay"></div></div>
+          </div>
+          <p class="hint">Los recuadros verdes son fotos detectadas: púlsalos para incluirlos o quitarlos. Arrastra sobre la captura para recortar otra foto.
+            <button type="button" class="mini" id="draw-toggle" aria-pressed="false">✂ Recortar con el dedo</button></p>
+          <div class="crop-strip" id="crop-strip" aria-label="Fotos que se guardarán"></div>
+        </section>
+
+        <section class="ed-form">
+          <div class="grid g4">
+            <label>Precio / mes<input name="price" id="f-price" type="number" min="0" step="any" inputmode="decimal"></label>
+            <label>Moneda
+              <select name="currency" id="f-currency"><option value="CZK">Kč (CZK)</option><option value="EUR">€ (EUR)</option><option value="USD">$ (USD)</option></select>
+            </label>
+            <label>Fianza<input name="deposit" id="f-deposit" type="number" min="0" step="any" inputmode="decimal"></label>
+            <label>Gastos aparte<input name="fees" id="f-fees" type="number" min="0" step="any" inputmode="decimal"></label>
+          </div>
+          <div class="grid g4">
+            <label>Tipo<input name="layout" id="f-layout" placeholder="2+kk, habitación…"></label>
+            <label>m²<input name="size" id="f-size" type="number" min="0" step="any" inputmode="decimal"></label>
+            <label>Disponible desde<input name="available" id="f-available" placeholder="1.11.2026"></label>
+            <label>Contrato mín. (meses)<input name="minMonths" id="f-minMonths" type="number" min="0" step="1" inputmode="numeric"></label>
+          </div>
+          <div class="grid g3">
+            <label>Servicios (agua, luz…)
+              <select name="utilities" id="f-utilities"><option value="">No se sabe</option><option value="included">Incluidos</option><option value="excluded">No incluidos</option></select>
+            </label>
+            <label>Mascotas
+              <select name="pets" id="f-pets"><option value="">No se sabe</option><option value="yes">Permitidas</option><option value="no">No permitidas</option></select>
+            </label>
+            <label>Estado
+              <select name="status" id="f-status"></select>
+            </label>
+          </div>
+          <label>Título<input name="title" id="f-title" maxlength="120"></label>
+
+          <div class="addr-row">
+            <label>Dirección, barrio o metro
+              <input name="address" id="f-address" placeholder="Vinohradská 125, Praha 2" autocomplete="off">
+            </label>
+            <button type="button" id="geo-btn">Buscar en el mapa</button>
+          </div>
+          <div class="mini-map" id="ed-map"></div>
+          <p class="geo-status" id="geo-status" aria-live="polite">Haz clic en el mapa o arrastra el pin para ajustar la ubicación.</p>
+
+          <label>Condiciones y extras (una por línea)<textarea name="conditions" id="f-conditions" rows="3"></textarea></label>
+          <label>Enlace al anuncio (opcional)<input name="url" id="f-url" type="url" placeholder="https://www.facebook.com/…"></label>
+          <label>Notas<textarea name="notes" id="f-notes" rows="2"></textarea></label>
+          <details class="ocr-details">
+            <summary>Texto leído de la captura</summary>
+            <textarea id="f-ocr" rows="7" spellcheck="false"></textarea>
+            <button type="button" id="reparse-btn">Rellenar los campos desde este texto</button>
+            <button type="button" id="ocr-retry" hidden>Releer la captura con más zoom</button>
+          </details>
+        </section>
+      </div>
+      <footer class="ed-foot">
+        <span id="ed-error" class="err" role="alert"></span>
+        <button type="button" id="ed-cancel">Cancelar</button>
+        <button type="submit" class="primary" id="ed-save">Guardar en el mapa</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="lightbox" class="lightbox" aria-label="Foto ampliada">
+    <button type="button" class="icon-btn" id="lb-close" aria-label="Cerrar">✕</button>
+    <button type="button" class="nav prev" id="lb-prev" aria-label="Anterior">‹</button>
+    <img id="lb-img" alt="">
+    <button type="button" class="nav next" id="lb-next" aria-label="Siguiente">›</button>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/tesseract/tesseract.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
