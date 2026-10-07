@@ -38,6 +38,22 @@ export function planSync({ local, localTombs, remote, remoteTombs }) {
 
 const TIMEOUT_MS = 20000;
 
+// Private network (ZeroTier, LAN, localhost): poll every 30 s as before. Anything else is the
+// internet through a tunnel whose free plan counts requests, so poll every 5 minutes and let
+// a tab/focus event trigger at most one sync a minute. Edits are still pushed right away.
+export function isPrivateHost(hostname) {
+  const h = String(hostname).replace(/^\[|\]$/g, '').toLowerCase();
+  if (h === 'localhost' || h === '::1' || h.endsWith('.local')) return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
+export const pollTiming = (hostname) => (isPrivateHost(hostname)
+  ? { pollMs: 30000, minGapMs: 0 }
+  : { pollMs: 300000, minGapMs: 60000 });
+
 export function createSync({ db, onChange = () => {}, onStatus = () => {}, fetchFn = (...args) => fetch(...args) }) {
   const url = (path) => new URL(`api/${path}`, document.baseURI).href;
   let mode = 'unknown'; // 'server' | 'none' | 'unreachable'
@@ -46,6 +62,7 @@ export function createSync({ db, onChange = () => {}, onStatus = () => {}, fetch
   let timer = null;
   let interval = null;
   let lastSync = 0;
+  let lastStart = 0;
 
   async function request(path, options = {}, timeout = TIMEOUT_MS) {
     const ac = new AbortController();
@@ -123,6 +140,7 @@ export function createSync({ db, onChange = () => {}, onStatus = () => {}, fetch
     if (mode === 'none') return;
     if (running) { again = true; return; }
     running = true;
+    lastStart = Date.now();
     status('syncing');
     try {
       if (mode !== 'server') {
@@ -158,8 +176,12 @@ export function createSync({ db, onChange = () => {}, onStatus = () => {}, fetch
     async start() {
       await syncNow();
       if (mode === 'none') return;
-      const tick = () => { if (document.visibilityState === 'visible') syncNow(); };
-      interval = setInterval(tick, 30000);
+      const { pollMs, minGapMs } = pollTiming(location.hostname);
+      const tick = () => {
+        if (document.visibilityState !== 'visible' || Date.now() - lastStart < minGapMs) return;
+        syncNow();
+      };
+      interval = setInterval(tick, pollMs);
       document.addEventListener('visibilitychange', tick);
       window.addEventListener('focus', tick);
       window.addEventListener('online', syncNow);

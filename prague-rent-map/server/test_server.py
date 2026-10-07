@@ -170,6 +170,17 @@ class StaticTests(ServerCase):
         self.assertEqual(res.getheader("X-Content-Type-Options"), "nosniff")
         self.assertEqual(res.getheader("Cache-Control"), "no-cache")
 
+    def test_vendor_and_assets_are_cacheable_but_code_is_revalidated(self):
+        (self.web / "vendor").mkdir()
+        (self.web / "vendor" / "lib.js").write_text("x", encoding="utf-8")
+        (self.web / "app.js").write_text("y", encoding="utf-8")
+        self.assertEqual(self.call("GET", "/vendor/lib.js")[2].getheader("Cache-Control"), "public, max-age=86400")
+        self.assertEqual(self.call("GET", "/app.js")[2].getheader("Cache-Control"), "no-cache")
+        # an error under /vendor/ must not be cached for a day
+        status, _, res = self.call("GET", "/vendor/missing.js")
+        self.assertEqual((status, res.getheader("Cache-Control")), (404, "no-cache"))
+        self.assertEqual(self.call("GET", "/api/ping")[2].getheader("Cache-Control"), "no-store")
+
     def test_index_carries_the_marker_the_client_looks_for(self):
         for path in ("/", "/index.html"):
             status, body, res = self.call("GET", path)

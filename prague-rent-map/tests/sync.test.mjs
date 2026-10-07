@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planSync, stamp } from '../js/sync.js';
+import { planSync, stamp, isPrivateHost, pollTiming } from '../js/sync.js';
 
 const plan = (o) => planSync({ local: [], localTombs: [], remote: [], remoteTombs: [], ...o });
 const L = (id, updatedAt) => ({ id, updatedAt });
@@ -63,4 +63,22 @@ test('stamp falls back to createdAt and then 0', () => {
   assert.equal(stamp({ updatedAt: 5, createdAt: 1 }), 5);
   assert.equal(stamp({ createdAt: 1 }), 1);
   assert.equal(stamp({}), 0);
+});
+
+test('private networks are recognised, public names and addresses are not', () => {
+  for (const h of ['localhost', '127.0.0.1', '[::1]', '10.144.189.75', '172.16.0.4', '172.31.255.1', '192.168.0.129', '169.254.1.1', 'mi-pc.local']) {
+    assert.equal(isPrivateHost(h), true, h);
+  }
+  for (const h of ['demo.ngrok-free.app', 'example.com', '8.8.8.8', '172.32.0.1', '172.15.0.1', '192.169.0.1', '11.0.0.1', '1.2.3']) {
+    assert.equal(isPrivateHost(h), false, h);
+  }
+});
+
+test('poll often on a private network, rarely (and throttled) through an internet tunnel', () => {
+  assert.deepEqual(pollTiming('10.144.189.75'), { pollMs: 30000, minGapMs: 0 });
+  assert.deepEqual(pollTiming('demo.ngrok-free.app'), { pollMs: 300000, minGapMs: 60000 });
+  // the monthly request budget of a metered tunnel (ngrok free: 20 000): one tab open 8 h/day
+  const { pollMs } = pollTiming('demo.ngrok-free.app');
+  const perMonth = (8 * 3600 * 1000 / pollMs) * 30;
+  assert.ok(perMonth < 3000, `polling alone would be ${perMonth} requests/month`);
 });

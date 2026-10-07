@@ -34,6 +34,7 @@ from urllib.parse import parse_qs, urlsplit
 
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 INDEX_MARKER = '<meta name="rentmap-server" content="1">'  # read by js/sync.js
+LONG_CACHE_PREFIXES = ("/vendor/", "/assets/")  # never change in place: the browser may keep them a day
 DEFAULT_MAX_BODY_MB = 40
 MAX_LISTINGS = 5000
 BACKUP_KEEP_DAYS = 14
@@ -181,10 +182,17 @@ class Handler(SimpleHTTPRequestHandler):
         if self.command in ("PUT", "DELETE") or not status.startswith(("2", "3")):
             super().log_message(fmt, *args)
 
+    def send_response(self, code, message=None):
+        self._status = int(code)
+        super().send_response(code, message)
+
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
         if not self.path.startswith("/api/"):
-            self.send_header("Cache-Control", "no-cache")
+            # every request counts against a metered tunnel (ngrok free: 20k/month), so the
+            # heavy static files get a day of cache; everything else is revalidated
+            long_lived = self.path.startswith(LONG_CACHE_PREFIXES) and getattr(self, "_status", 0) == 200
+            self.send_header("Cache-Control", "public, max-age=86400" if long_lived else "no-cache")
         super().end_headers()
 
     def send_json(self, status, payload):
