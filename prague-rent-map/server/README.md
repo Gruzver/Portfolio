@@ -87,27 +87,6 @@ Cada dirección web es un "sitio" distinto para el navegador, así que lo guarda
 - Usa la hora de cada dispositivo. Si dos dispositivos tuvieran el reloj muy desfasado y editaras el mismo anuncio en ambos casi a la vez, podría ganar el equivocado. Para una sola persona es un riesgo pequeño.
 - Si importas un anuncio que habías borrado antes en ese dispositivo, se entiende como "tráelo de vuelta".
 
-## Exponerlo a internet con ngrok (opcional)
-
-Solo si necesitas entrar desde un dispositivo que no tiene ZeroTier. **Sin contraseña, cualquiera que tenga la dirección puede leer, editar y borrar todos los anuncios** (con capturas y teléfonos de terceros): configura antes la contraseña de la sección anterior, y puedes abrir el túnel solo cuando haga falta.
-
-El servidor sigue escuchando **solo en la IP de ZeroTier**. El programa de ngrok corre en la misma laptop y se conecta a él desde dentro, así que no se abre ningún puerto en el router.
-
-1. Crea una cuenta gratuita en ngrok. En su panel verás tu **dominio** gratuito (algo como `nombre.ngrok-free.app`) y tu **authtoken**.
-2. Instala ngrok en la laptop siguiendo https://ngrok.com/download/linux y registra el token **a mano en tu terminal**: `ngrok config add-authtoken <TU_TOKEN>`. No lo pegues en chats ni en archivos del repo.
-3. Declara tu dominio para el servidor y para el túnel, **una vez**, en la parte de arriba del `crontab` (`crontab -e`), antes de las líneas `@reboot`:
-   ```
-   RENTMAP_NGROK_DOMAIN=nombre.ngrok-free.app
-   @reboot $HOME/rent-map-app/prague-rent-map/server/run.sh >> $HOME/rent-map-data/server.log 2>&1
-   @reboot $HOME/rent-map-app/prague-rent-map/server/ngrok.sh >> $HOME/rent-map-data/ngrok.log 2>&1
-   ```
-   `run.sh` acepta ese nombre como `Host` válido y `ngrok.sh` abre el túnel hacia la IP de ZeroTier cuando el servidor ya responde. Para probarlo a mano sin reiniciar: `RENTMAP_NGROK_DOMAIN=nombre.ngrok-free.app ~/rent-map-app/prague-rent-map/server/ngrok.sh` (reinicia antes `run.sh` con la misma variable).
-4. Abre `https://nombre.ngrok-free.app/`. La primera vez ngrok muestra una página de aviso: pulsa para continuar (se recuerda 7 días).
-
-Cosas que conviene saber del plan gratuito (según su documentación): 1 GB de salida y 20 000 peticiones HTTP al mes. Por eso, cuando entras por internet la web sincroniza cada 5 minutos en vez de cada 30 segundos, y los cambios que haces siguen enviándose al momento. Los archivos pesados (`vendor/`, `assets/`) se guardan un día en el navegador para gastar menos peticiones. Todo el tráfico pasa por los servidores de ngrok.
-
-Para cerrar el acceso público basta con borrar la línea de `ngrok.sh` del `crontab` y parar el proceso `ngrok`.
-
 ## Contraseña (opcional)
 
 Con `RENTMAP_PASSWORD` definida, **todas** las peticiones (la web, los archivos y la API) piden usuario y contraseña con la ventana normal del navegador («autenticación básica»). Es la pantalla de contraseña más simple que hay: sirve **cualquier nombre de usuario**, lo único que se comprueba es la contraseña. El navegador la recuerda mientras dura la sesión y la web sincroniza igual que siempre.
@@ -137,9 +116,9 @@ Detalles que conviene saber:
 - Para cambiar la contraseña: edita el archivo y reinicia `run.sh`.
 - `ngrok.sh` sigue funcionando: da el servidor por activo si responde 200 o 401.
 
-## Exponerlo con Cloudflare Tunnel «rápido» (opcional, sin cuenta)
+## Exponerlo a internet con Cloudflare Tunnel «rápido» (opcional, sin cuenta)
 
-Alternativa a ngrok que no necesita cuenta: `cloudflared` abre un túnel y te da una dirección `https://algo-aleatorio.trycloudflare.com`. **Cambia cada vez que arrancas el túnel**, así que sirve para entrar de vez en cuando, no como dirección fija. **Hazlo siempre con contraseña** (sección anterior): Cloudflare no añade ningún login a estos túneles.
+Es la vía que se usa en la laptop de producción: no necesita cuenta ni página de aviso. `cloudflared` abre un túnel y te da una dirección `https://algo-aleatorio.trycloudflare.com` (la imprime en su salida al arrancar). **Cambia cada vez que arrancas el túnel**, así que conviene guardarla o enviártela al arrancar en vez de recordarla. **Hazlo siempre con contraseña** (sección «Contraseña»): Cloudflare no añade ningún login a estos túneles.
 
 El servidor solo contesta a la API si el `Host` de la petición es el esperado, y el túnel envía su propio nombre. Lo más sencillo es decirle a `cloudflared` que reescriba el `Host` hacia la dirección interna (así no hay que dar de alta el nombre aleatorio):
 
@@ -147,7 +126,30 @@ El servidor solo contesta a la API si el `Host` de la petición es el esperado, 
 cloudflared tunnel --url http://<IP-ZeroTier>:8789 --http-host-header <IP-ZeroTier>:8789
 ```
 
-Sin ese `--http-host-header` la web carga pero la sincronización falla con «host not allowed» (403). El servidor sigue escuchando solo en la IP de ZeroTier; `cloudflared` corre en la misma laptop y se conecta desde dentro. Para cerrar el acceso, para el proceso `cloudflared`: la dirección deja de existir.
+Sin ese `--http-host-header` la web carga pero la sincronización falla con «host not allowed» (403). El servidor sigue escuchando solo en la IP de ZeroTier; `cloudflared` corre en la misma laptop y se conecta desde dentro. Para cerrar el acceso, para el proceso `cloudflared`: la dirección deja de existir. Conviene abrir el túnel solo cuando el servidor ya responde (un 401 también cuenta como «responde»), y resolver la IP de ZeroTier en cada arranque como hace `run.sh`.
+
+Como entras desde una dirección que no es privada, la web sincroniza cada 5 minutos en vez de cada 30 segundos; lo que editas se envía al momento.
+
+## Alternativa: exponerlo con ngrok (opcional)
+
+Solo si necesitas entrar desde un dispositivo que no tiene ZeroTier. **Sin contraseña, cualquiera que tenga la dirección puede leer, editar y borrar todos los anuncios** (con capturas y teléfonos de terceros): configura antes la contraseña (sección «Contraseña»), y puedes abrir el túnel solo cuando haga falta.
+
+El servidor sigue escuchando **solo en la IP de ZeroTier**. El programa de ngrok corre en la misma laptop y se conecta a él desde dentro, así que no se abre ningún puerto en el router.
+
+1. Crea una cuenta gratuita en ngrok. En su panel verás tu **dominio** gratuito (algo como `nombre.ngrok-free.app`) y tu **authtoken**.
+2. Instala ngrok en la laptop siguiendo https://ngrok.com/download/linux y registra el token **a mano en tu terminal**: `ngrok config add-authtoken <TU_TOKEN>`. No lo pegues en chats ni en archivos del repo.
+3. Declara tu dominio para el servidor y para el túnel, **una vez**, en la parte de arriba del `crontab` (`crontab -e`), antes de las líneas `@reboot`:
+   ```
+   RENTMAP_NGROK_DOMAIN=nombre.ngrok-free.app
+   @reboot $HOME/rent-map-app/prague-rent-map/server/run.sh >> $HOME/rent-map-data/server.log 2>&1
+   @reboot $HOME/rent-map-app/prague-rent-map/server/ngrok.sh >> $HOME/rent-map-data/ngrok.log 2>&1
+   ```
+   `run.sh` acepta ese nombre como `Host` válido y `ngrok.sh` abre el túnel hacia la IP de ZeroTier cuando el servidor ya responde. Para probarlo a mano sin reiniciar: `RENTMAP_NGROK_DOMAIN=nombre.ngrok-free.app ~/rent-map-app/prague-rent-map/server/ngrok.sh` (reinicia antes `run.sh` con la misma variable).
+4. Abre `https://nombre.ngrok-free.app/`. La primera vez ngrok muestra una página de aviso: pulsa para continuar (se recuerda 7 días).
+
+Cosas que conviene saber del plan gratuito (según su documentación): 1 GB de salida y 20 000 peticiones HTTP al mes. Por eso, cuando entras por internet la web sincroniza cada 5 minutos en vez de cada 30 segundos, y los cambios que haces siguen enviándose al momento. Los archivos pesados (`vendor/`, `assets/`) se guardan un día en el navegador para gastar menos peticiones. Todo el tráfico pasa por los servidores de ngrok.
+
+Para cerrar el acceso público basta con borrar la línea de `ngrok.sh` del `crontab` y parar el proceso `ngrok`.
 
 ## Seguridad: qué hace y qué no
 
