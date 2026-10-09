@@ -10,6 +10,7 @@
 #   RENTMAP_NGROK_DOMAIN  your ngrok domain (name.ngrok-free.app): accepted as a valid Host
 #   RENTMAP_ALLOW_HOST    other Host names to accept, comma separated
 #   RENTMAP_PASSWORD   if set (8+ characters), every request needs this password (HTTP Basic, any user name)
+#   RENTMAP_MIN_PASSWORD  shortest password accepted (default 8); lower it only on purpose, it is a risk
 #   RENTMAP_ENV_FILE   file of KEY=value lines (chmod 600) loaded first; keeps the password out of crontab and git
 #   RENTMAP_REQUIRE_PASSWORD  1 = refuse to start when no password ends up configured (use it with a public tunnel)
 set -u

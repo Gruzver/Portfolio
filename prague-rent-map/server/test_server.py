@@ -22,6 +22,7 @@ def listing(listing_id="a1", updated=1000, **extra):
 class ServerCase(unittest.TestCase):
     max_body_mb = 5
     password = None
+    min_password_length = srv.MIN_PASSWORD_LENGTH
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -30,7 +31,8 @@ class ServerCase(unittest.TestCase):
         self.web.mkdir()
         (self.web / "index.html").write_text("<html><head><title>t</title></head><body><h1>mapa</h1></body></html>", encoding="utf-8")
         self.data = base / "data"
-        self.server = srv.build_server("127.0.0.1", 0, self.web, self.data, max_body_mb=self.max_body_mb, password=self.password)
+        self.server = srv.build_server("127.0.0.1", 0, self.web, self.data, max_body_mb=self.max_body_mb, password=self.password,
+                                       min_password_length=self.min_password_length)
         self.server.fail_delay = 0  # keep the suite fast; the delay itself is tested separately
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
@@ -301,6 +303,47 @@ class PasswordTests(ServerCase):
         self.assertLess(time.monotonic() - started, 0.3)
 
 
+class ShortPasswordTests(ServerCase):
+    """A short password is allowed only on purpose, through min_password_length (RENTMAP_MIN_PASSWORD)."""
+    password = "gr"
+    min_password_length = 2
+
+    def test_short_password_works_once_allowed(self):
+        self.assertEqual(self.call("GET", "/api/ping")[0], 401)
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", "gr"))[0], 200)
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", "g"))[0], 401)
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", "grr"))[0], 401)
+
+
+class FailureThrottleTests(ServerCase):
+    password = "correct horse"
+
+    def test_wrong_guesses_are_answered_one_at_a_time(self):
+        self.server.fail_delay = 0.2
+        results = []
+
+        def guess(n):
+            started = time.monotonic()
+            status = self.call("GET", "/api/ping", headers=basic("gr", f"wrong-{n}"))[0]
+            results.append((status, time.monotonic() - started))
+
+        threads = [threading.Thread(target=guess, args=(n,)) for n in range(6)]
+        started = time.monotonic()
+        for t in threads:
+            t.start()
+        # while the failures queue up, the right password is not held back
+        quick = time.monotonic()
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", self.password))[0], 200)
+        self.assertLess(time.monotonic() - quick, 0.15)
+        for t in threads:
+            t.join()
+        total = time.monotonic() - started
+        self.assertEqual([r[0] for r in results], [401] * 6)
+        # six parallel guesses at 0.2 s each take about 1.2 s in sequence (side by side they would take 0.2 s)
+        self.assertGreaterEqual(total, 1.0)
+        self.assertGreaterEqual(max(r[1] for r in results), 1.0)
+
+
 class PasswordWithSymbolsTests(ServerCase):
     password = "pässwörd: con dos puntos ✓"
 
@@ -345,6 +388,34 @@ class StoreAndStartupTests(unittest.TestCase):
                 server = srv.build_server("127.0.0.1", 0, web, data, **kwargs)
                 self.assertEqual(server.password, kwargs["password"].encode() if "password" in kwargs else None)
                 server.server_close()
+
+    def test_minimum_password_length_can_be_lowered_on_purpose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            web = Path(tmp) / "web"
+            web.mkdir()
+            data = Path(tmp) / "data"
+            with self.assertRaises(SystemExit):  # the default still refuses a short one
+                srv.build_server("127.0.0.1", 0, web, data, password="gr")
+            server = srv.build_server("127.0.0.1", 0, web, data, password="gr", min_password_length=2)
+            self.assertEqual(server.password, b"gr")
+            server.server_close()
+            with self.assertRaises(SystemExit):  # lowered to 2, one character is still too short
+                srv.build_server("127.0.0.1", 0, web, data, password="g", min_password_length=2)
+            for empty_ok_attempt in (1, 2):  # empty is never accepted, whatever the minimum
+                with self.assertRaises(SystemExit):
+                    srv.build_server("127.0.0.1", 0, web, data, password="", min_password_length=empty_ok_attempt)
+            for bad in (0, -1, "2", None, 1.5):
+                with self.assertRaises(SystemExit, msg=repr(bad)):
+                    srv.build_server("127.0.0.1", 0, web, data, password="gr", min_password_length=bad)
+
+    def test_min_password_setting_is_read_strictly(self):
+        self.assertEqual(srv.min_password_from_env(None), srv.MIN_PASSWORD_LENGTH)
+        self.assertEqual(srv.min_password_from_env(""), srv.MIN_PASSWORD_LENGTH)
+        self.assertEqual(srv.min_password_from_env("  "), srv.MIN_PASSWORD_LENGTH)
+        self.assertEqual(srv.min_password_from_env(" 2 "), 2)
+        for bad in ("abc", "2.5", "two"):
+            with self.assertRaises(SystemExit, msg=bad):
+                srv.min_password_from_env(bad)
 
     def test_refuses_data_inside_web_root(self):
         with tempfile.TemporaryDirectory() as tmp:

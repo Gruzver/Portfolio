@@ -108,6 +108,24 @@ chmod 644 "$T/mapa.env"
 PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$NPORT" RENTMAP_DATA="$T/data4" RENTMAP_ENV_FILE="$T/mapa.env" RENTMAP_WAIT_SECS=0.01 timeout 3 bash "$HERE/run.sh" > "$T/perm.log" 2>&1
 grep -q "readable by other users" "$T/perm.log" && check "warns when the env file is readable by other users" ok || check "permission warning" no "$(cat "$T/perm.log")"
 
+echo "--- short password only when allowed on purpose (RENTMAP_MIN_PASSWORD)"
+printf 'RENTMAP_PASSWORD=gr\n' > "$T/short.env"; chmod 600 "$T/short.env"
+SPORT="$(free_port)"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$SPORT" RENTMAP_DATA="$T/data5" RENTMAP_ENV_FILE="$T/short.env" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/short1.log" 2>&1
+rc=$?
+{ [ "$rc" != 0 ] && grep -q "at least 8 characters" "$T/short1.log" && grep -q "RENTMAP_MIN_PASSWORD" "$T/short1.log"; } && check "a 2-character password is refused by default, and the error says how to allow it" ok || check "short password refused" no "rc=$rc $(cat "$T/short1.log")"
+for bad in abc 0 -1 2.5; do
+  PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$SPORT" RENTMAP_DATA="$T/data5" RENTMAP_ENV_FILE="$T/short.env" RENTMAP_MIN_PASSWORD="$bad" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/shortbad.log" 2>&1
+  rc=$?
+  { [ "$rc" != 0 ] && [ "$(code "http://127.0.0.1:$SPORT/api/ping")" = 000 ]; } && check "RENTMAP_MIN_PASSWORD=$bad is refused" ok || check "bad minimum $bad" no "rc=$rc $(cat "$T/shortbad.log")"
+done
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$SPORT" RENTMAP_DATA="$T/data5" RENTMAP_ENV_FILE="$T/short.env" RENTMAP_MIN_PASSWORD=2 RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/short2.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 60); do [ "$(code "http://127.0.0.1:$SPORT/api/ping")" != 000 ] && break; sleep 0.25; done
+[ "$(code "http://127.0.0.1:$SPORT/api/ping")" = 401 ] && [ "$(code -u gr:gr "http://127.0.0.1:$SPORT/api/ping")" = 200 ] && [ "$(code -u gr:g "http://127.0.0.1:$SPORT/api/ping")" = 401 ] \
+  && check "with RENTMAP_MIN_PASSWORD=2 the short password works (and only it)" ok || check "short password allowed" no "$(cat "$T/short2.log")"
+grep -q "fewer than 8 characters" "$T/short2.log" && check "start-up warns that the password is short" ok || check "short password warning" no "$(cat "$T/short2.log")"
+
 echo
 [ "$FAILED" = 0 ] && echo "all launcher tests passed" || echo "SOME LAUNCHER TESTS FAILED"
 exit "$FAILED"

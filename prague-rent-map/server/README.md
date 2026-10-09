@@ -48,7 +48,7 @@ curl http://<IP-ZeroTier>:8789/api/ping
 
 `run.sh` espera hasta ~5 minutos a que ZeroTier tenga interfaz (cron arranca antes), resuelve la IP en cada arranque, y **se niega a arrancar** si no la encuentra: nunca cae a `0.0.0.0`.
 
-Variables opcionales: `RENTMAP_PORT` (por defecto 8789), `RENTMAP_DATA` (por defecto `~/rent-map-data`), `RENTMAP_BIND` (IP fija, solo para pruebas), y las de contraseña (`RENTMAP_PASSWORD`, `RENTMAP_ENV_FILE`, `RENTMAP_REQUIRE_PASSWORD`) que se explican abajo.
+Variables opcionales: `RENTMAP_PORT` (por defecto 8789), `RENTMAP_DATA` (por defecto `~/rent-map-data`), `RENTMAP_BIND` (IP fija, solo para pruebas), y las de contraseña (`RENTMAP_PASSWORD`, `RENTMAP_MIN_PASSWORD`, `RENTMAP_ENV_FILE`, `RENTMAP_REQUIRE_PASSWORD`) que se explican abajo.
 
 ## Actualizar a una versión nueva
 
@@ -110,10 +110,11 @@ Con `RENTMAP_PASSWORD` definida, **todas** las peticiones (la web, los archivos 
 
 Detalles que conviene saber:
 
-- La contraseña tiene **mínimo 8 caracteres**. Una contraseña vacía se rechaza (no se interpreta como «sin contraseña»), y con `RENTMAP_REQUIRE_PASSWORD=1` (`--require-password` en `server.py`) el servidor **se niega a arrancar** si no hay ninguna. Así un archivo mal escrito o una variable que no cargó nunca deja el servidor abierto sin que te enteres. La línea de arranque en el log dice `password: required` o `password: none`; nunca imprime la contraseña.
-- Tras una contraseña incorrecta el servidor espera medio segundo antes de contestar. No es un bloqueo (detrás de un túnel todas las peticiones llegan desde la misma dirección y un bloqueo por IP dejaría fuera a todo el mundo), pero frena los intentos automáticos. Elige una frase larga.
+- La contraseña tiene **mínimo 8 caracteres** (ver el último punto si quieres una más corta, a conciencia). Una contraseña vacía se rechaza (no se interpreta como «sin contraseña»), y con `RENTMAP_REQUIRE_PASSWORD=1` (`--require-password` en `server.py`) el servidor **se niega a arrancar** si no hay ninguna. Así un archivo mal escrito o una variable que no cargó nunca deja el servidor abierto sin que te enteres. La línea de arranque en el log dice `password: required` o `password: none`; nunca imprime la contraseña.
+- Las contraseñas incorrectas se contestan **de una en una, con medio segundo entre ellas, para todo el servidor**: como mucho unos 2 intentos fallidos por segundo, abra el atacante las conexiones que abra (detrás de un túnel todas las peticiones llegan desde la misma dirección, así que no se puede limitar por IP). Quien escribe la contraseña correcta nunca espera; quien se equivoca puede esperar un poco si alguien está probando a la vez. Eso frena la fuerza bruta contra una contraseña larga, pero **no protege una corta**: con 2 caracteres bastan de unos 10 minutos a poco más de una hora.
 - Va por **HTTP**: dentro de ZeroTier no importa (el tráfico ya va cifrado), y por ngrok o Cloudflare el tramo de internet va cifrado con HTTPS. Sin túnel y fuera de ZeroTier, la contraseña viajaría en claro: no lo uses así.
 - Para cambiar la contraseña: edita el archivo y reinicia `run.sh`.
+- **Una contraseña corta, a conciencia.** Para una herramienta temporal puedes bajar el mínimo con `RENTMAP_MIN_PASSWORD=2` en el mismo archivo (un número entero de 1 o más; vacía nunca se acepta). El servidor arranca y escribe un aviso en el log (`fewer than 8 characters`). Es tu decisión, pero tenlo claro: cualquiera que encuentre la dirección del túnel puede leer y borrar los anuncios, y los anuncios llevan teléfonos de terceros. Las copias diarias de 14 días cubren el borrado, no la lectura.
 - `ngrok.sh` sigue funcionando: da el servidor por activo si responde 200 o 401.
 
 ## Exponerlo a internet con Cloudflare Tunnel «rápido» (opcional, sin cuenta)
@@ -170,7 +171,7 @@ Para cerrar el acceso público basta con borrar la línea de `ngrok.sh` del `cro
 | ngrok dice que el dominio no es válido o no conecta | Comprueba `ngrok http --help` (los agentes recientes usan `--url`, los antiguos `--domain`; `ngrok.sh` prueba los dos), que el token está registrado y `~/rent-map-data/ngrok.log`. |
 | Por internet sale "host not allowed" (403) | El dominio de `RENTMAP_NGROK_DOMAIN` no coincide con el que usas, o reiniciaste ngrok pero no `run.sh` con la variable. |
 | El navegador pide usuario y contraseña | Es la contraseña de `RENTMAP_PASSWORD`; el usuario puede ser cualquiera. Si no la recuerdas, cámbiala en el archivo y reinicia `run.sh`. |
-| Al arrancar dice «password must have at least 8 characters» / «no password is configured» | `RENTMAP_ENV_FILE` apunta a un archivo sin `RENTMAP_PASSWORD`, vacío o demasiado corta. Revisa el archivo (y que cron lo vea: ruta completa). |
+| Al arrancar dice «password must have at least 8 characters» / «no password is configured» | `RENTMAP_ENV_FILE` apunta a un archivo sin `RENTMAP_PASSWORD`, o la contraseña está vacía o es más corta que el mínimo. Revisa el archivo (y que cron lo vea: ruta completa). Si quieres una corta a propósito, añade `RENTMAP_MIN_PASSWORD=<largo>`. |
 | Por Cloudflare la web carga pero no sincroniza (403) | Falta `--http-host-header <IP-ZeroTier>:8789` en el comando de `cloudflared`. |
 | El puerto está ocupado | Cambia `RENTMAP_PORT` (8787 y 8788 los usan otros servicios tuyos). |
 

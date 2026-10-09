@@ -11,6 +11,9 @@ If the server is going to be reachable from the internet (for example through a 
 the RENTMAP_PASSWORD environment variable: every request, static files included, then needs
 HTTP Basic auth with that password (any user name). Add --require-password so the server
 refuses to start at all when no password is configured, instead of silently running open.
+The password must have 8 characters or more unless RENTMAP_MIN_PASSWORD lowers that limit on
+purpose (a short password can be guessed in minutes). Wrong guesses are answered one at a time,
+half a second apart, so brute force is capped at about 2 guesses per second.
 
 API (all JSON, paths relative to the server root):
   GET    /api/ping
@@ -42,8 +45,11 @@ from urllib.parse import parse_qs, urlsplit
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 INDEX_MARKER = '<meta name="rentmap-server" content="1">'  # read by js/sync.js
 LONG_CACHE_PREFIXES = ("/vendor/", "/assets/")  # never change in place: the browser may keep them a day
-MIN_PASSWORD_LENGTH = 8
-FAIL_DELAY_S = 0.5  # pause after a wrong password; behind a tunnel every client shares one address, so no per-IP limit
+MIN_PASSWORD_LENGTH = 8  # default; RENTMAP_MIN_PASSWORD can lower it on purpose (never below 1: empty is always refused)
+# After a wrong password the answer waits this long, one failure at a time for the whole server
+# (behind a tunnel every client shares one address, so there is no per-IP limit to use): at most
+# 1 / FAIL_DELAY_S wrong guesses per second, however many connections an attacker opens.
+FAIL_DELAY_S = 0.5
 DEFAULT_MAX_BODY_MB = 40
 MAX_LISTINGS = 5000
 BACKUP_KEEP_DAYS = 14
@@ -236,7 +242,8 @@ class Handler(SimpleHTTPRequestHandler):
         if check_basic_auth(header, password):
             return False
         if header:  # a wrong password, as opposed to the browser's first try without credentials
-            time.sleep(self.server.fail_delay)
+            with self.server.fail_lock:  # one failure at a time: parallel guesses queue up instead of running side by side
+                time.sleep(self.server.fail_delay)
         body = json.dumps({"error": "password required"}).encode("utf-8")
         self.close_connection = True  # any request body was not read
         self.send_response(HTTPStatus.UNAUTHORIZED)
@@ -382,17 +389,21 @@ class RentMapServer(ThreadingHTTPServer):
         self.store = store
         self.password = password  # bytes, or None for no authentication
         self.fail_delay = FAIL_DELAY_S
+        self.fail_lock = threading.Lock()
         self.allowed_hosts = {h.lower() for h in allowed_hosts}
         self.max_body = max_body
 
 
 def build_server(bind, port, web_root, data_dir, extra_hosts=(), max_body_mb=DEFAULT_MAX_BODY_MB, allow_any_interface=False,
-                 password=None, require_password=False):
+                 password=None, require_password=False, min_password_length=MIN_PASSWORD_LENGTH):
+    if not isinstance(min_password_length, int) or min_password_length < 1:
+        raise SystemExit("RENTMAP_MIN_PASSWORD must be a whole number of 1 or more (an empty password is never accepted).")
     if password is None and require_password:
         raise SystemExit("--require-password is set but no password is configured (RENTMAP_PASSWORD). Not starting.")
-    if password is not None and len(password) < MIN_PASSWORD_LENGTH:
-        raise SystemExit(f"The password must have at least {MIN_PASSWORD_LENGTH} characters (an empty RENTMAP_PASSWORD "
-                         "is refused too, so a failed environment load cannot leave the server open).")
+    if password is not None and len(password) < min_password_length:
+        raise SystemExit(f"The password must have at least {min_password_length} characters (an empty RENTMAP_PASSWORD "
+                         "is refused too, so a failed environment load cannot leave the server open). "
+                         "A shorter one has to be allowed on purpose with RENTMAP_MIN_PASSWORD.")
     address = ipaddress.ip_address(bind)
     if address.is_unspecified and not allow_any_interface:
         raise SystemExit("Refusing to listen on all interfaces: the data has no password. "
@@ -426,6 +437,16 @@ def backup_loop(store):
         time.sleep(3600)
 
 
+def min_password_from_env(raw):
+    """RENTMAP_MIN_PASSWORD: unset or blank means the default; anything else must be a whole number."""
+    if raw is None or not raw.strip():
+        return MIN_PASSWORD_LENGTH
+    try:
+        return int(raw.strip())
+    except ValueError:
+        raise SystemExit(f"RENTMAP_MIN_PASSWORD={raw!r} is not a whole number. Not starting.") from None
+
+
 def main():
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description="Rent map server (static app + listings storage)")
@@ -440,8 +461,13 @@ def main():
                         help="refuse to start unless RENTMAP_PASSWORD is set (use it whenever the server is reachable from the internet)")
     args = parser.parse_args()
 
+    password = os.environ.get("RENTMAP_PASSWORD")
     server = build_server(args.bind, args.port, args.web, args.data, args.allow_host, args.max_body_mb, args.allow_any_interface,
-                          password=os.environ.get("RENTMAP_PASSWORD"), require_password=args.require_password)
+                          password=password, require_password=args.require_password,
+                          min_password_length=min_password_from_env(os.environ.get("RENTMAP_MIN_PASSWORD")))
+    if password is not None and len(password) < MIN_PASSWORD_LENGTH:
+        print(f"warning: the password has fewer than {MIN_PASSWORD_LENGTH} characters (allowed by RENTMAP_MIN_PASSWORD): "
+              "anyone who finds the address can guess it in minutes", file=sys.stderr, flush=True)
     threading.Thread(target=backup_loop, args=(server.store,), daemon=True).start()
     print(f"serving {Path(args.web).resolve()} on http://{args.bind}:{args.port}/  data: {Path(args.data).resolve()}  "
           f"password: {'required' if server.password is not None else 'none'}", flush=True)
