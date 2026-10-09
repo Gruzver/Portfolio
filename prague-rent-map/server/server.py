@@ -2,10 +2,15 @@
 """Rent-map server: serves the static app and keeps the listings as JSON files, so every
 device that opens the app sees the same list. Python 3.10+, standard library only.
 
-There is NO authentication on purpose: the listings contain third-party phone numbers and
+By default there is NO authentication: the listings contain third-party phone numbers and
 screenshots, so the server must only be reachable from a private network (ZeroTier).
 For that reason it refuses to bind to 0.0.0.0 unless you pass --allow-any-interface, and it
 only answers requests whose Host header is one it expects (protects against DNS rebinding).
+
+If the server is going to be reachable from the internet (for example through a tunnel), set
+the RENTMAP_PASSWORD environment variable: every request, static files included, then needs
+HTTP Basic auth with that password (any user name). Add --require-password so the server
+refuses to start at all when no password is configured, instead of silently running open.
 
 API (all JSON, paths relative to the server root):
   GET    /api/ping
@@ -16,6 +21,8 @@ API (all JSON, paths relative to the server root):
 """
 
 import argparse
+import base64
+import hmac
 import ipaddress
 import json
 import math
@@ -35,6 +42,8 @@ from urllib.parse import parse_qs, urlsplit
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 INDEX_MARKER = '<meta name="rentmap-server" content="1">'  # read by js/sync.js
 LONG_CACHE_PREFIXES = ("/vendor/", "/assets/")  # never change in place: the browser may keep them a day
+MIN_PASSWORD_LENGTH = 8
+FAIL_DELAY_S = 0.5  # pause after a wrong password; behind a tunnel every client shares one address, so no per-IP limit
 DEFAULT_MAX_BODY_MB = 40
 MAX_LISTINGS = 5000
 BACKUP_KEEP_DAYS = 14
@@ -168,6 +177,19 @@ def validate_listing(listing_id, data):
     return None
 
 
+def check_basic_auth(header, password):
+    """True if `header` is HTTP Basic auth whose password matches. Any user name is accepted.
+    The comparison takes the same time wherever the first difference is."""
+    if not header or not header.lower().startswith("basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header[6:].strip(), validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    _, colon, supplied = decoded.partition(":")
+    return bool(colon) and hmac.compare_digest(supplied.encode("utf-8"), password)
+
+
 class Handler(SimpleHTTPRequestHandler):
     server_version = "RentMap/1.0"
 
@@ -205,6 +227,28 @@ class Handler(SimpleHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def require_auth(self):
+        """True when the request was refused (a 401 has already been sent): the caller must stop."""
+        password = self.server.password
+        if password is None:
+            return False
+        header = self.headers.get("Authorization")
+        if check_basic_auth(header, password):
+            return False
+        if header:  # a wrong password, as opposed to the browser's first try without credentials
+            time.sleep(self.server.fail_delay)
+        body = json.dumps({"error": "password required"}).encode("utf-8")
+        self.close_connection = True  # any request body was not read
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("WWW-Authenticate", 'Basic realm="Mapa de alquiler", charset="UTF-8"')
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+        return True
+
     def host_allowed(self):
         host = (self.headers.get("Host") or "").lower()
         return host in self.server.allowed_hosts
@@ -238,6 +282,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     # -- verbs --------------------------------------------------------------------------
     def do_GET(self):
+        if self.require_auth():
+            return None
         if not self.is_api():
             return None if self.serve_index() else super().do_GET()
         if not self.host_allowed():
@@ -262,11 +308,15 @@ class Handler(SimpleHTTPRequestHandler):
         return self.send_json(HTTPStatus.NOT_FOUND, {"error": "unknown endpoint"})
 
     def do_HEAD(self):
+        if self.require_auth():
+            return None
         if self.is_api():
             return self.send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": "use GET"})
         return None if self.serve_index() else super().do_HEAD()
 
     def do_PUT(self):
+        if self.require_auth():
+            return None
         route = self.route() if self.is_api() else []
         if not (len(route) == 2 and route[0] == "listings" and ID_RE.match(route[1])):
             return self.send_json(HTTPStatus.NOT_FOUND, {"error": "unknown endpoint"})
@@ -298,6 +348,8 @@ class Handler(SimpleHTTPRequestHandler):
         return self.send_json(HTTPStatus.OK, {"ok": True, "updatedAt": updated})
 
     def do_DELETE(self):
+        if self.require_auth():
+            return None
         route = self.route() if self.is_api() else []
         if not (len(route) == 2 and route[0] == "listings" and ID_RE.match(route[1])):
             return self.send_json(HTTPStatus.NOT_FOUND, {"error": "unknown endpoint"})
@@ -315,6 +367,8 @@ class Handler(SimpleHTTPRequestHandler):
         return self.send_json(HTTPStatus.OK, {"ok": True, "deletedAt": stamp})
 
     def do_POST(self):
+        if self.require_auth():
+            return None
         return self.send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method not allowed"})
 
     do_PATCH = do_POST
@@ -323,14 +377,22 @@ class Handler(SimpleHTTPRequestHandler):
 class RentMapServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, handler, store, allowed_hosts, max_body):
+    def __init__(self, address, handler, store, allowed_hosts, max_body, password=None):
         super().__init__(address, handler)
         self.store = store
+        self.password = password  # bytes, or None for no authentication
+        self.fail_delay = FAIL_DELAY_S
         self.allowed_hosts = {h.lower() for h in allowed_hosts}
         self.max_body = max_body
 
 
-def build_server(bind, port, web_root, data_dir, extra_hosts=(), max_body_mb=DEFAULT_MAX_BODY_MB, allow_any_interface=False):
+def build_server(bind, port, web_root, data_dir, extra_hosts=(), max_body_mb=DEFAULT_MAX_BODY_MB, allow_any_interface=False,
+                 password=None, require_password=False):
+    if password is None and require_password:
+        raise SystemExit("--require-password is set but no password is configured (RENTMAP_PASSWORD). Not starting.")
+    if password is not None and len(password) < MIN_PASSWORD_LENGTH:
+        raise SystemExit(f"The password must have at least {MIN_PASSWORD_LENGTH} characters (an empty RENTMAP_PASSWORD "
+                         "is refused too, so a failed environment load cannot leave the server open).")
     address = ipaddress.ip_address(bind)
     if address.is_unspecified and not allow_any_interface:
         raise SystemExit("Refusing to listen on all interfaces: the data has no password. "
@@ -344,7 +406,8 @@ def build_server(bind, port, web_root, data_dir, extra_hosts=(), max_body_mb=DEF
     for name in {bind, "localhost", "127.0.0.1"}:
         hosts.update({name, f"{name}:{port}"})
     handler = partial(Handler, directory=str(web_root))
-    server = RentMapServer((bind, port), handler, store, hosts, max_body_mb * 1024 * 1024)
+    server = RentMapServer((bind, port), handler, store, hosts, max_body_mb * 1024 * 1024,
+                           None if password is None else password.encode("utf-8"))
     if port == 0:  # tests: the real port is only known after binding
         real = server.server_address[1]
         for name in {bind, "localhost", "127.0.0.1"}:
@@ -372,12 +435,16 @@ def main():
     parser.add_argument("--data", default=str(Path.home() / "rent-map-data"), help="where listings and backups are stored")
     parser.add_argument("--allow-host", action="append", default=[], help="extra Host header to accept (e.g. a DNS name)")
     parser.add_argument("--max-body-mb", type=int, default=DEFAULT_MAX_BODY_MB)
-    parser.add_argument("--allow-any-interface", action="store_true", help="allow 0.0.0.0 (NOT recommended: no password)")
+    parser.add_argument("--allow-any-interface", action="store_true", help="allow 0.0.0.0 (NOT recommended unless a password is set)")
+    parser.add_argument("--require-password", action="store_true",
+                        help="refuse to start unless RENTMAP_PASSWORD is set (use it whenever the server is reachable from the internet)")
     args = parser.parse_args()
 
-    server = build_server(args.bind, args.port, args.web, args.data, args.allow_host, args.max_body_mb, args.allow_any_interface)
+    server = build_server(args.bind, args.port, args.web, args.data, args.allow_host, args.max_body_mb, args.allow_any_interface,
+                          password=os.environ.get("RENTMAP_PASSWORD"), require_password=args.require_password)
     threading.Thread(target=backup_loop, args=(server.store,), daemon=True).start()
-    print(f"serving {Path(args.web).resolve()} on http://{args.bind}:{args.port}/  data: {Path(args.data).resolve()}", flush=True)
+    print(f"serving {Path(args.web).resolve()} on http://{args.bind}:{args.port}/  data: {Path(args.data).resolve()}  "
+          f"password: {'required' if server.password is not None else 'none'}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

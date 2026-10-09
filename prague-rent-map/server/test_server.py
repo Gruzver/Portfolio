@@ -1,9 +1,11 @@
 """Tests for server.py. Run with:  python3 -m unittest discover -s server -v"""
 
+import base64
 import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
 from datetime import date
 from pathlib import Path
@@ -19,6 +21,7 @@ def listing(listing_id="a1", updated=1000, **extra):
 
 class ServerCase(unittest.TestCase):
     max_body_mb = 5
+    password = None
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -27,9 +30,10 @@ class ServerCase(unittest.TestCase):
         self.web.mkdir()
         (self.web / "index.html").write_text("<html><head><title>t</title></head><body><h1>mapa</h1></body></html>", encoding="utf-8")
         self.data = base / "data"
-        self.server = srv.build_server("127.0.0.1", 0, self.web, self.data, max_body_mb=self.max_body_mb)
+        self.server = srv.build_server("127.0.0.1", 0, self.web, self.data, max_body_mb=self.max_body_mb, password=self.password)
+        self.server.fail_delay = 0  # keep the suite fast; the delay itself is tested separately
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
 
     def tearDown(self):
@@ -197,6 +201,124 @@ class StaticTests(ServerCase):
         self.assertEqual(self.call("GET", "/%2e%2e/data/listings/a1.json")[0], 404)
 
 
+def basic(user, password):
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
+
+
+class PasswordTests(ServerCase):
+    password = "correct horse"
+
+    def assertDenied(self, method, path, body=None, headers=None):
+        status, payload, res = self.call(method, path, body, headers)
+        self.assertEqual(status, 401, f"{method} {path}")
+        self.assertTrue(res.getheader("WWW-Authenticate", "").startswith("Basic realm="), f"{method} {path}")
+        return payload
+
+    def test_every_route_and_verb_needs_the_password(self):
+        for method, path in [("GET", "/"), ("GET", "/index.html"), ("GET", "/missing.js"), ("GET", "/api/ping"),
+                             ("GET", "/api/index"), ("GET", "/api/listings/a1"), ("HEAD", "/"), ("HEAD", "/api/ping"),
+                             ("DELETE", "/api/listings/a1"), ("POST", "/api/ping"), ("PATCH", "/api/ping")]:
+            self.assertDenied(method, path)
+        self.assertDenied("PUT", "/api/listings/a1", listing("a1"))
+
+    def test_denied_requests_have_no_side_effects_and_leak_nothing(self):
+        payload = self.assertDenied("GET", "/")
+        self.assertEqual(payload, {"error": "password required"})
+        self.assertDenied("PUT", "/api/listings/a1", listing("a1", notes="secret"))
+        self.assertDenied("DELETE", "/api/listings/a1?at=5")
+        status, body, _ = self.call("GET", "/api/index", headers=basic("gr", self.password))
+        self.assertEqual((status, body), (200, {"listings": [], "deleted": []}))
+
+    def test_head_denial_has_no_body(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("HEAD", "/")
+        res = conn.getresponse()
+        self.assertEqual((res.status, res.read()), (401, b""))
+        conn.close()
+
+    def test_right_password_works_for_any_user_name(self):
+        for user in ("gr", "", "otro usuario", "ñ"):
+            status, body, _ = self.call("GET", "/api/ping", headers=basic(user, self.password))
+            self.assertEqual((status, body["ok"]), (200, True), repr(user))
+        status, page, _ = self.call("GET", "/", headers=basic("gr", self.password))
+        self.assertEqual(status, 200)
+        self.assertIn(b"mapa", page)
+        self.assertIn(srv.INDEX_MARKER.encode(), page)
+
+    def test_full_sync_cycle_behind_the_password(self):
+        auth = basic("gr", self.password)
+        self.assertEqual(self.call("PUT", "/api/listings/a1", listing("a1", 1000, notes="ñandú"), auth)[0], 200)
+        status, body, _ = self.call("GET", "/api/listings/a1", headers=auth)
+        self.assertEqual((status, body["notes"]), (200, "ñandú"))
+        self.assertEqual(self.call("DELETE", "/api/listings/a1?at=2000", headers=auth)[0], 200)
+        status, body, _ = self.call("GET", "/api/index", headers=auth)
+        self.assertEqual(body, {"listings": [], "deleted": [{"id": "a1", "deletedAt": 2000}]})
+
+    def test_wrong_or_malformed_credentials_are_refused(self):
+        good = base64.b64encode(f"gr:{self.password}".encode()).decode()
+        bad_headers = [
+            basic("gr", "wrong password"),
+            basic("gr", self.password + "x"),          # longer
+            basic("gr", self.password[:-1]),           # prefix
+            basic("gr", ""),
+            basic(self.password, "wrong"),              # the password given as the user name
+            {"Authorization": "Basic"},
+            {"Authorization": "Basic "},
+            {"Authorization": "Basic !!!not-base64!!!"},
+            {"Authorization": "Basic " + base64.b64encode(self.password.encode()).decode()},  # no colon
+            {"Authorization": "Basic " + base64.b64encode(b"gr:\xff\xfe").decode()},          # not UTF-8
+            {"Authorization": "Bearer " + good},
+            {"Authorization": good},
+            {"Authorization": "Digest username=gr"},
+        ]
+        for headers in bad_headers:
+            self.assertDenied("GET", "/api/ping", headers=headers)
+            self.assertDenied("PUT", "/api/listings/a1", listing("a1"), headers)
+
+    def test_scheme_name_is_case_insensitive(self):
+        token = base64.b64encode(f"gr:{self.password}".encode()).decode()
+        status, _, _ = self.call("GET", "/api/ping", headers={"Authorization": f"basic {token}"})
+        self.assertEqual(status, 200)
+
+    def test_host_check_still_applies_after_login(self):
+        auth = basic("gr", self.password)
+        status, _, _ = self.call("GET", "/api/ping", headers=auth, host="evil.example")
+        self.assertEqual(status, 403)
+        # and a wrong Host never gets past the password either
+        self.assertDenied("GET", "/api/ping", headers={})
+
+    def test_delay_only_after_a_wrong_password(self):
+        self.server.fail_delay = 0.4
+        started = time.monotonic()
+        self.assertDenied("GET", "/api/ping")  # the browser's first try carries no credentials
+        self.assertLess(time.monotonic() - started, 0.3)
+        started = time.monotonic()
+        self.assertDenied("GET", "/api/ping", headers=basic("gr", "wrong password"))
+        self.assertGreaterEqual(time.monotonic() - started, 0.35)
+        started = time.monotonic()
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", self.password))[0], 200)
+        self.assertLess(time.monotonic() - started, 0.3)
+
+
+class PasswordWithSymbolsTests(ServerCase):
+    password = "pässwörd: con dos puntos ✓"
+
+    def test_colon_and_non_ascii_password(self):
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", self.password))[0], 200)
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", "pässwörd"))[0], 401)
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", " con dos puntos ✓"))[0], 401)
+
+
+class NoPasswordTests(ServerCase):
+    def test_open_server_never_asks_for_credentials(self):
+        status, _, res = self.call("GET", "/api/ping")
+        self.assertEqual(status, 200)
+        self.assertIsNone(res.getheader("WWW-Authenticate"))
+        # credentials sent to an open server are simply ignored
+        self.assertEqual(self.call("GET", "/api/ping", headers=basic("gr", "anything"))[0], 200)
+
+
 class StoreAndStartupTests(unittest.TestCase):
     def test_refuses_all_interfaces_without_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,6 +328,23 @@ class StoreAndStartupTests(unittest.TestCase):
                 srv.build_server("0.0.0.0", 0, web, Path(tmp) / "data")
             server = srv.build_server("0.0.0.0", 0, web, Path(tmp) / "data", allow_any_interface=True)
             server.server_close()
+
+    def test_password_rules_at_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            web = Path(tmp) / "web"
+            web.mkdir()
+            data = Path(tmp) / "data"
+            for bad in ("", "short", "1234567"):  # empty included: a failed env-file load must not leave it open
+                with self.assertRaises(SystemExit, msg=repr(bad)):
+                    srv.build_server("127.0.0.1", 0, web, data, password=bad)
+            with self.assertRaises(SystemExit):
+                srv.build_server("127.0.0.1", 0, web, data, require_password=True)
+            with self.assertRaises(SystemExit):
+                srv.build_server("127.0.0.1", 0, web, data, password="", require_password=True)
+            for kwargs in ({"password": "12345678"}, {"password": "12345678", "require_password": True}, {}):
+                server = srv.build_server("127.0.0.1", 0, web, data, **kwargs)
+                self.assertEqual(server.password, kwargs["password"].encode() if "password" in kwargs else None)
+                server.server_close()
 
     def test_refuses_data_inside_web_root(self):
         with tempfile.TemporaryDirectory() as tmp:
