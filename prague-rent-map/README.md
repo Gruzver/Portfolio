@@ -25,6 +25,8 @@ No necesita servidor, cuenta ni claves de API.
 - **Servidor propio (opcional):** si ejecutas `server/server.py` en una máquina de tu red privada, todos tus dispositivos ven la misma lista y se sincronizan solos, también tras quedarse sin conexión. Ver [`server/README.md`](server/README.md). Sin servidor, la app funciona igual que siempre, solo local.
 
 > Muchos anuncios solo dicen el barrio («Vinohrady, Praha 2»). En ese caso el pin queda marcado como **aproximado** (`≈` y borde discontinuo) para que no se confunda con una dirección exacta.
+>
+> Si el anuncio no dice ningún lugar que se reconozca, **no se inventa uno**: puedes guardarlo **sin ubicación**. Sale en la lista con «📍 sin ubicación», no aparece en el mapa ni tiene distancias (una posición falsa daría distancias falsas a F4F y MRS), y puedes colocarlo después con «Editar» y un clic en el mapa. Se reconocen barrios de Praga y algunos pueblos de alrededor (Hostivice, Černošice, Jesenice, Říčany, Průhonice, Roztoky, Zbraslav).
 
 ## Privacidad
 
@@ -48,7 +50,7 @@ Los módulos ES no funcionan abriendo `index.html` con doble clic; sirve la carp
 ```sh
 cd prague-rent-map
 python3 -m http.server 8000      # y abre http://localhost:8000
-node --test tests/parse.test.mjs tests/photos.test.mjs   # tests unitarios
+node --test tests/parse.test.mjs tests/photos.test.mjs tests/sync.test.mjs tests/geo.test.mjs   # tests unitarios
 ```
 
 ## Estructura

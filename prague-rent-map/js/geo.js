@@ -1,11 +1,18 @@
 // Turns the place hints found in a post into map coordinates.
 // 1) Nominatim (OpenStreetMap) is asked, from most to least specific.
 // 2) If that fails (offline, rate-limited, no match) an offline table of Prague
-//    neighbourhoods gives an approximate position, flagged as such.
+//    neighbourhoods (and a few towns just outside) gives an approximate position, flagged as such.
+// 3) If nothing is recognised, locate() returns null: the listing can still be saved, as
+//    «unknown» (see UNLOCATED), and it is never drawn or measured as if it were in the centre.
 
 import { norm } from './parse.js';
 
 export const CENTER = { lat: 50.0875, lng: 14.4213, label: 'Staroměstské nám.' };
+
+// A listing whose post gave no usable location. The server needs numeric lat/lng, so these hold
+// the centre only to fill the field; precision 'unknown' means: not on the map, no distances.
+export const UNLOCATED = { lat: CENTER.lat, lng: CENTER.lng, precision: 'unknown' };
+export const isLocated = (listing) => listing.precision !== 'unknown';
 const VIEWBOX = '14.22,50.18,14.71,49.94'; // left,top,right,bottom around Prague
 const AREA_TYPES = new Set(['suburb', 'neighbourhood', 'quarter', 'city_district', 'district', 'borough', 'city', 'town', 'village', 'municipality', 'state', 'county', 'region', 'postcode']);
 const STREET_TYPES = new Set(['road', 'highway', 'footway', 'pedestrian', 'path', 'residential', 'street']);
@@ -64,6 +71,14 @@ const PLACES = [
   ['Černý Most', ['cerny most'], 50.1090, 14.5760],
   ['Radotín', ['radotin'], 49.9900, 14.3600],
   ['Uhříněves', ['uhrineves'], 50.0300, 14.5970],
+  ['Zbraslav', ['zbraslav'], 49.9733, 14.3922],
+  // just outside Prague (okres Praha-západ / Praha-východ), often advertised as «near Prague»
+  ['Hostivice', ['hostivic'], 50.0803, 14.2578],
+  ['Černošice', ['cernosic'], 49.9617, 14.3200],
+  ['Jesenice', ['jesenic'], 49.9644, 14.5106],
+  ['Říčany', ['ricany'], 49.9917, 14.6567],
+  ['Průhonice', ['pruhonic'], 49.9967, 14.5547],
+  ['Roztoky', ['roztok'], 50.1594, 14.4025],
   ['náměstí Míru', ['namesti miru'], 50.0753, 14.4378],
   ['Václavské náměstí', ['vaclavske nam', 'wenceslas sq'], 50.0810, 14.4270],
   ['Karlovo náměstí', ['karlovo nam'], 50.0756, 14.4175],
