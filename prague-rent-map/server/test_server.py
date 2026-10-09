@@ -69,6 +69,12 @@ class ApiTests(ServerCase):
         status, body, _ = self.call("GET", "/api/index")
         self.assertEqual(body, {"listings": [], "deleted": []})
 
+    def test_listing_without_a_location_is_stored_like_any_other(self):
+        data = listing("u1", 1000, precision="unknown", address="")
+        self.assertEqual(self.call("PUT", "/api/listings/u1", data)[0], 200)
+        status, body, _ = self.call("GET", "/api/listings/u1")
+        self.assertEqual((status, body["precision"]), (200, "unknown"))
+
     def test_put_get_roundtrip_and_index(self):
         status, body, _ = self.call("PUT", "/api/listings/a1", listing("a1", 1000, notes="ñandú ✓"))
         self.assertEqual((status, body["updatedAt"]), (200, 1000))

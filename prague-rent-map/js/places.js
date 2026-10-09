@@ -2,7 +2,7 @@
 // Positions are approximate until Nominatim confirms them; a confirmed position is
 // cached in localStorage and only accepted if it lands close to the built-in one.
 
-import { distanceKm, locate } from './geo.js';
+import { distanceKm, isLocated, locate } from './geo.js';
 
 export const POIS = [
   {
@@ -69,6 +69,6 @@ export async function refinePois() {
   return changed;
 }
 
-export const distancesTo = (point) => POIS.map((p) => ({ id: p.id, short: p.short, km: distanceKm(point, p) }));
+export const distancesTo = (point) => (isLocated(point) ? POIS.map((p) => ({ id: p.id, short: p.short, km: distanceKm(point, p) })) : []);
 
 export const fmtKm = (km) => `${km.toFixed(1).replace('.', ',')} km`;

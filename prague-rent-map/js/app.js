@@ -1,7 +1,7 @@
 import * as db from './db.js';
 import { createSync } from './sync.js';
 import { createEditor } from './editor.js';
-import { CENTER, distanceKm } from './geo.js';
+import { CENTER, distanceKm, isLocated } from './geo.js';
 import { el, money, inCzk, safeUrl, toast, STATUS, STAY_MONTHS } from './dom.js';
 import { POIS, applyCachedPois, refinePois, distancesTo, fmtKm } from './places.js';
 
@@ -125,7 +125,9 @@ const markers = new Map();
 const markerLayer = L.layerGroup().addTo(map);
 
 // ---- helpers ----------------------------------------------------------------------------
-const kmToCenter = (l) => distanceKm(l, CENTER);
+// straight-line km; a listing without a location sorts after every located one
+const km = (l, point) => (isLocated(l) ? distanceKm(l, point) : 1e9);
+const kmToCenter = (l) => km(l, CENTER);
 
 function visible() {
   const hide = $('hide-discarded').checked;
@@ -135,8 +137,8 @@ function visible() {
     recent: (a, b) => b.createdAt - a.createdAt,
     'price-asc': (a, b) => inCzk(a.price, a.currency) - inCzk(b.price, b.currency),
     'price-desc': (a, b) => inCzk(b.price, b.currency) - inCzk(a.price, a.currency),
-    f4f: (a, b) => distanceKm(a, POIS[0]) - distanceKm(b, POIS[0]),
-    mrs: (a, b) => distanceKm(a, POIS[1]) - distanceKm(b, POIS[1]),
+    f4f: (a, b) => km(a, POIS[0]) - km(b, POIS[0]),
+    mrs: (a, b) => km(a, POIS[1]) - km(b, POIS[1]),
     center: (a, b) => kmToCenter(a) - kmToCenter(b),
   }[sort];
   return list.sort(by);
@@ -163,6 +165,7 @@ function render() {
   markerLayer.clearLayers();
   markers.clear();
   for (const l of shown) {
+    if (!isLocated(l)) continue; // listed, but there is nowhere to draw it
     const m = L.marker([l.lat, l.lng], { icon: pillIcon(l), keyboard: true, title: l.title, riseOnHover: true });
     m.on('click', () => select(l.id));
     m.addTo(markerLayer);
@@ -188,7 +191,7 @@ function itemFor(l) {
         el('strong', { class: 'item-price' }, l.price != null ? money(l.price, l.currency) : 'Precio ¿?'),
         el('span', { class: 'item-title' }, l.title),
         el('span', { class: 'item-meta' },
-          distancesTo(l).map((d) => `${d.short} ${fmtKm(d.km)}`).join(' · '),
+          isLocated(l) ? distancesTo(l).map((d) => `${d.short} ${fmtKm(d.km)}`).join(' · ') : '📍 sin ubicación',
           l.status && l.status !== 'new' ? ` · ${STATUS[l.status]}` : '',
           l.precision === 'area' ? ' · ubicación aproximada' : ''))));
 }
@@ -237,7 +240,9 @@ function renderDrawer(l) {
       chips.length ? el('ul', { class: 'chips' }, chips) : null,
       el('p', { class: 'where' },
         `📍 ${l.address || 'Sin dirección'}`,
-        el('span', { class: 'dist' }, `En línea recta: ${[...distancesTo(l).map((d) => `${d.short} ${fmtKm(d.km)}`), `centro ${fmtKm(kmToCenter(l))}`].join(' · ')}`),
+        isLocated(l)
+          ? el('span', { class: 'dist' }, `En línea recta: ${[...distancesTo(l).map((d) => `${d.short} ${fmtKm(d.km)}`), `centro ${fmtKm(kmToCenter(l))}`].join(' · ')}`)
+          : el('span', { class: 'dist' }, 'Sin ubicación: no sale en el mapa ni tiene distancias. Pulsa «Editar» y haz clic en el mapa para colocarla.'),
         l.precision === 'area' ? el('em', {}, ' Ubicación aproximada: el anuncio solo indicaba la zona.') : null),
       l.photos?.length
         ? el('div', { class: 'photos' }, l.photos.map((src, i) => el('button', { type: 'button', class: 'photo', 'aria-label': `Ver foto ${i + 1}`, onclick: () => openLightbox(l.photos, i) }, el('img', { src, alt: `Foto ${i + 1}`, loading: 'lazy' }))))
@@ -247,7 +252,7 @@ function renderDrawer(l) {
       l.notes ? el('p', { class: 'notes' }, l.notes) : null,
       el('div', { class: 'dr-actions' },
         url ? el('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Abrir publicación') : null,
-        el('a', { class: 'btn', href: `https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`, target: '_blank', rel: 'noopener noreferrer' }, 'Google Maps'),
+        isLocated(l) ? el('a', { class: 'btn', href: `https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`, target: '_blank', rel: 'noopener noreferrer' }, 'Google Maps') : null,
         l.screenshot ? el('button', { type: 'button', class: 'btn', onclick: () => openLightbox([l.screenshot], 0) }, 'Ver captura') : null),
       el('label', { class: 'status-row' }, 'Estado ', statusSelect),
       el('div', { class: 'dr-actions' },
@@ -270,7 +275,7 @@ function select(id, { fly = false } = {}) {
   render();
   renderDrawer(l);
   $('drawer').scrollTop = 0;
-  focusOn([l.lat, l.lng], fly ? 16 : 14);
+  if (isLocated(l)) focusOn([l.lat, l.lng], fly ? 16 : 14);
   document.querySelector('.item.sel')?.scrollIntoView({ block: 'nearest' });
 }
 
@@ -382,7 +387,7 @@ $('sample-btn').addEventListener('click', async () => {
 $('sort').addEventListener('change', render);
 $('hide-discarded').addEventListener('change', render);
 $('fit-btn').addEventListener('click', () => {
-  const pts = visible().map((l) => [l.lat, l.lng]);
+  const pts = visible().filter(isLocated).map((l) => [l.lat, l.lng]);
   if (!pts.length) { map.setView(PRAGUE, 12); return; }
   // keep the workplaces in frame so each listing can be judged against them
   pts.push(...POIS.map((p) => [p.lat, p.lng]));

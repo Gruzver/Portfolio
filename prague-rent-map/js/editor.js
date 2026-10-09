@@ -5,7 +5,7 @@ import { el, loadImage, uid, safeUrl, STATUS } from './dom.js';
 import { analyzeBackground, detectPhotoRects, cropToDataURL } from './photos.js';
 import { prepareForOcr, recognize } from './ocr.js';
 import { parseListing } from './parse.js';
-import { locate, findPlace } from './geo.js';
+import { locate, findPlace, isLocated, UNLOCATED } from './geo.js';
 
 const $ = (id) => document.getElementById(id);
 const PRAGUE = [50.0755, 14.4378];
@@ -67,6 +67,9 @@ export function createEditor() {
     if (pin) { pin.remove(); pin = null; }
   }
 
+  const NO_LOCATION_MSG = 'No pude ubicarlo. Escribe la dirección arriba y pulsa Enter, o haz clic en el mapa. '
+    + 'Si no, se guardará sin ubicación: saldrá en la lista pero no en el mapa, y podrás colocarla después.';
+
   async function runGeocode({ manual = false } = {}) {
     const sess = s;
     sess.geoAbort?.abort();
@@ -79,7 +82,7 @@ export function createEditor() {
       : sess.hints || {};
     const hints = { ...base, address: typed };
     if (!typed && !base.street && !base.metro && !base.place && !base.district) {
-      setGeoStatus('No encontré ninguna dirección en el texto. Escríbela arriba o haz clic en el mapa.', 'warn');
+      setGeoStatus(NO_LOCATION_MSG, 'warn');
       return;
     }
     setGeoStatus('Buscando la ubicación…', 'busy');
@@ -87,7 +90,7 @@ export function createEditor() {
       const r = await locate(hints, { signal: ac.signal, onTry: (q) => { if (s === sess) setGeoStatus(`Buscando «${q}»…`, 'busy'); } });
       if (s !== sess || ac.signal.aborted) return;
       if (!r) {
-        setGeoStatus('No pude ubicarlo automáticamente. Haz clic en el mapa para colocar el pin.', 'warn');
+        setGeoStatus(NO_LOCATION_MSG, 'warn');
         return;
       }
       if (sess.loc?.precision === 'manual' && !manual) return;
@@ -223,6 +226,7 @@ export function createEditor() {
   async function runOcr(scale = 0) {
     const sess = s;
     const token = ++sess.ocrRun;
+    sess.reading = true;
     $('ocr-retry').hidden = true;
     setOcr('Preparando la captura…', null);
     try {
@@ -242,6 +246,8 @@ export function createEditor() {
     } catch (err) {
       console.error(err);
       if (s === sess) setOcr('No se pudo leer el texto automáticamente. Rellena los campos a mano.', 0);
+    } finally {
+      if (token === sess.ocrRun) sess.reading = false;
     }
   }
 
@@ -288,7 +294,11 @@ export function createEditor() {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!s) return;
-    if (!s.loc) { setError('Falta la ubicación: busca la dirección o haz clic en el mapa para colocar el pin.'); return; }
+    if (!s.loc && (s.reading || $('geo-status').dataset.tone === 'busy')) {
+      setError('Todavía estoy leyendo el texto y buscando la ubicación. Espera un momento o haz clic en el mapa.');
+      return;
+    }
+    const loc = s.loc || UNLOCATED; // nothing found and no pin placed: saved without a location
     const text = (name) => field(name).value.trim();
     const num = (name) => (text(name) === '' ? null : Number(text(name)));
     const url = text('url') ? safeUrl(text('url')) : '';
@@ -315,9 +325,9 @@ export function createEditor() {
       pets: text('pets'),
       status: text('status') || 'new',
       address: text('address'),
-      lat: s.loc.lat,
-      lng: s.loc.lng,
-      precision: s.loc.precision,
+      lat: loc.lat,
+      lng: loc.lng,
+      precision: loc.precision,
       conditions: field('conditions').value.split('\n').map((x) => x.trim()).filter(Boolean),
       url,
       notes: text('notes'),
@@ -355,9 +365,14 @@ export function createEditor() {
         $('f-ocr').value = listing.ocrText || '';
         sess.ocrText = listing.ocrText || '';
         renderStrip();
-        setPin(listing.lat, listing.lng, listing.precision);
-        miniMap.setView([listing.lat, listing.lng], 16);
-        setGeoStatus('Arrastra el pin o haz clic en el mapa para corregir la ubicación.');
+        if (isLocated(listing)) {
+          setPin(listing.lat, listing.lng, listing.precision);
+          miniMap.setView([listing.lat, listing.lng], 16);
+          setGeoStatus('Arrastra el pin o haz clic en el mapa para corregir la ubicación.');
+        } else {
+          miniMap.setView(PRAGUE, 11);
+          setGeoStatus('Este anuncio no tiene ubicación. Haz clic en el mapa para colocarla, o escribe la dirección y pulsa Enter.', 'warn');
+        }
         return;
       }
 
