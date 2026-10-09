@@ -82,6 +82,7 @@ export function createSync({ db, onChange = () => {}, onStatus = () => {}, fetch
     if (!document.querySelector('meta[name="rentmap-server"]')) return 'none';
     try {
       const res = await request('ping', {}, 3000);
+      if (res.status === 401) return 'unreachable'; // password protected: keep retrying instead of giving up
       if (!res.ok) return 'none'; // a static host answers 404: there is no server here
       const body = await res.json();
       return body && body.app === 'prague-rent-map-server' ? 'server' : 'none';

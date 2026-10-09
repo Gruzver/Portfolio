@@ -33,10 +33,12 @@ if [ -z "$IP" ]; then
   exit 1
 fi
 
-# do not open a public tunnel to a server that is not up
+# do not open a public tunnel to a server that is not up (401 = up, but asking for its password)
 up=""
 for _ in $(seq 60); do
-  if curl -fsS -m 3 "http://$IP:$PORT/api/ping" >/dev/null 2>&1; then up=1; break; fi
+  case "$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://$IP:$PORT/api/ping" 2>/dev/null)" in
+    200|401) up=1; break ;;
+  esac
   sleep "$WAIT"
 done
 if [ -z "$up" ]; then

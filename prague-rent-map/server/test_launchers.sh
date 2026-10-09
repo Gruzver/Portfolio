@@ -73,6 +73,59 @@ PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$(free_port)" RENTMAP_W
 rc=$?
 { [ "$rc" = 1 ] && [ ! -e "$T/ngrok.args" ] && grep -q "not opening the tunnel" "$T/n4.log"; } && check "does not open a public tunnel when the server is down" ok || check "no tunnel without server" no "rc=$rc"
 
+echo "--- password (RENTMAP_ENV_FILE / RENTMAP_REQUIRE_PASSWORD)"
+SECRET="clave-de-prueba 123"
+printf 'RENTMAP_PASSWORD="%s"\n' "$SECRET" > "$T/mapa.env"
+chmod 600 "$T/mapa.env"
+PPORT="$(free_port)"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$PPORT" RENTMAP_DATA="$T/data3" RENTMAP_ENV_FILE="$T/mapa.env" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/pw.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 60); do [ "$(code "http://127.0.0.1:$PPORT/api/ping")" != 000 ] && break; sleep 0.25; done
+[ "$(code "http://127.0.0.1:$PPORT/api/ping")" = 401 ] && check "password from the env file: no credentials -> 401" ok || check "401 without credentials" no "$(cat "$T/pw.log")"
+[ "$(code -u "gr:wrong" "http://127.0.0.1:$PPORT/api/ping")" = 401 ] && check "wrong password -> 401" ok || check "wrong password" no
+[ "$(code -u "gr:$SECRET" "http://127.0.0.1:$PPORT/api/ping")" = 200 ] && check "right password -> 200" ok || check "right password" no
+[ "$(code -u "gr:$SECRET" "http://127.0.0.1:$PPORT/")" = 200 ] && check "right password opens the web page too" ok || check "web page with password" no
+grep -q "password: required" "$T/pw.log" && ! grep -q "$SECRET" "$T/pw.log" && check "the log says a password is required and never prints it" ok || check "log content" no "$(cat "$T/pw.log")"
+
+echo "--- ngrok.sh treats a password-protected server as up"
+rm -f "$T/ngrok.args"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$PPORT" RENTMAP_NGROK_DOMAIN="$DOMAIN" bash "$HERE/ngrok.sh" > "$T/n5.log" 2>&1
+[ "$(cat "$T/ngrok.args" 2>/dev/null)" = "http --url=https://$DOMAIN 127.0.0.1:$PPORT" ] && check "opens the tunnel when the ping answers 401" ok || check "tunnel with 401 ping" no "$(cat "$T/n5.log")"
+
+echo "--- run.sh refuses to run open when a password is required"
+NPORT="$(free_port)"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$NPORT" RENTMAP_DATA="$T/data4" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/nopw.log" 2>&1
+rc=$?
+{ [ "$rc" != 0 ] && grep -q "no password is configured" "$T/nopw.log" && [ "$(code "http://127.0.0.1:$NPORT/api/ping")" = 000 ]; } && check "no password + require -> does not start" ok || check "require without password" no "rc=$rc $(cat "$T/nopw.log")"
+printf 'RENTMAP_PASSWORD=\n' > "$T/empty.env"; chmod 600 "$T/empty.env"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$NPORT" RENTMAP_DATA="$T/data4" RENTMAP_ENV_FILE="$T/empty.env" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/emptypw.log" 2>&1
+rc=$?
+{ [ "$rc" != 0 ] && grep -q "at least 8 characters" "$T/emptypw.log" && [ "$(code "http://127.0.0.1:$NPORT/api/ping")" = 000 ]; } && check "empty password is refused, not treated as open" ok || check "empty password" no "rc=$rc $(cat "$T/emptypw.log")"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$NPORT" RENTMAP_DATA="$T/data4" RENTMAP_ENV_FILE="$T/missing.env" bash "$HERE/run.sh" > "$T/noenv.log" 2>&1
+rc=$?
+{ [ "$rc" = 1 ] && grep -q "not readable" "$T/noenv.log" && [ "$(code "http://127.0.0.1:$NPORT/api/ping")" = 000 ]; } && check "a missing env file stops the start (never runs open by accident)" ok || check "missing env file" no "rc=$rc"
+chmod 644 "$T/mapa.env"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$NPORT" RENTMAP_DATA="$T/data4" RENTMAP_ENV_FILE="$T/mapa.env" RENTMAP_WAIT_SECS=0.01 timeout 3 bash "$HERE/run.sh" > "$T/perm.log" 2>&1
+grep -q "readable by other users" "$T/perm.log" && check "warns when the env file is readable by other users" ok || check "permission warning" no "$(cat "$T/perm.log")"
+
+echo "--- short password only when allowed on purpose (RENTMAP_MIN_PASSWORD)"
+printf 'RENTMAP_PASSWORD=gr\n' > "$T/short.env"; chmod 600 "$T/short.env"
+SPORT="$(free_port)"
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$SPORT" RENTMAP_DATA="$T/data5" RENTMAP_ENV_FILE="$T/short.env" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/short1.log" 2>&1
+rc=$?
+{ [ "$rc" != 0 ] && grep -q "at least 8 characters" "$T/short1.log" && grep -q "RENTMAP_MIN_PASSWORD" "$T/short1.log"; } && check "a 2-character password is refused by default, and the error says how to allow it" ok || check "short password refused" no "rc=$rc $(cat "$T/short1.log")"
+for bad in abc 0 -1 2.5; do
+  PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$SPORT" RENTMAP_DATA="$T/data5" RENTMAP_ENV_FILE="$T/short.env" RENTMAP_MIN_PASSWORD="$bad" RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/shortbad.log" 2>&1
+  rc=$?
+  { [ "$rc" != 0 ] && [ "$(code "http://127.0.0.1:$SPORT/api/ping")" = 000 ]; } && check "RENTMAP_MIN_PASSWORD=$bad is refused" ok || check "bad minimum $bad" no "rc=$rc $(cat "$T/shortbad.log")"
+done
+PATH="$T/bin:$PATH" RENTMAP_BIND=127.0.0.1 RENTMAP_PORT="$SPORT" RENTMAP_DATA="$T/data5" RENTMAP_ENV_FILE="$T/short.env" RENTMAP_MIN_PASSWORD=2 RENTMAP_REQUIRE_PASSWORD=1 bash "$HERE/run.sh" > "$T/short2.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 60); do [ "$(code "http://127.0.0.1:$SPORT/api/ping")" != 000 ] && break; sleep 0.25; done
+[ "$(code "http://127.0.0.1:$SPORT/api/ping")" = 401 ] && [ "$(code -u gr:gr "http://127.0.0.1:$SPORT/api/ping")" = 200 ] && [ "$(code -u gr:g "http://127.0.0.1:$SPORT/api/ping")" = 401 ] \
+  && check "with RENTMAP_MIN_PASSWORD=2 the short password works (and only it)" ok || check "short password allowed" no "$(cat "$T/short2.log")"
+grep -q "fewer than 8 characters" "$T/short2.log" && check "start-up warns that the password is short" ok || check "short password warning" no "$(cat "$T/short2.log")"
+
 echo
 [ "$FAILED" = 0 ] && echo "all launcher tests passed" || echo "SOME LAUNCHER TESTS FAILED"
 exit "$FAILED"
